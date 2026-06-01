@@ -203,7 +203,8 @@ async def handle_text_task(message: Message):
         ai_response, tokens_used = await ask_code_model(
             full_prompt,
             system_prompt=system_prompt,
-            conversation_history=history[:-1],  # Без последнего (мы уже в промпте)
+            conversation_history=history[:-1],
+            user_id=user_id,
         )
 
         # Сохраняем ответ в историю

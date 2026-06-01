@@ -18,14 +18,9 @@ ALLOWED_USERS: list[int] = [
     if uid.strip().isdigit()
 ]
 
-# === CLAUDE API ===
-GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-
-# Модель для текста и кода
-CODE_MODEL: str = os.getenv("CODE_MODEL", "gemini-1.5-flash")
-
-# Модель для изображений (та же, Claude умеет vision)
-VISION_MODEL: str = os.getenv("VISION_MODEL", "gemini-1.5-flash")
+# === AI API ===
+OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")  # оставлен для совместимости
 
 # === ПУТИ ===
 BASE_DIR: Path = Path(__file__).parent

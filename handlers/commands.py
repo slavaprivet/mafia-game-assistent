@@ -6,9 +6,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from loguru import logger
 
 from config import ALLOWED_USERS
@@ -17,6 +17,7 @@ from limit_manager import get_limit_status
 from git_manager import format_git_status, is_git_repo
 from game_expert import format_index_message, index_game, search_in_code
 from teacher import explain_error, suggest_best_practices
+from ai_client import AVAILABLE_MODELS, get_user_model, set_user_model
 
 router = Router()
 
@@ -312,6 +313,48 @@ async def cmd_clear(message: Message):
     await message.answer(
         "🧹 Контекст разговора очищен.\n"
         "Теперь я не помню предыдущие сообщения этой сессии."
+    )
+
+
+@router.message(Command("model"))
+async def cmd_model(message: Message):
+    """Выбор AI модели."""
+    if not is_allowed(message.from_user.id):
+        return
+
+    current = get_user_model(message.from_user.id)
+    buttons = []
+    for key, info in AVAILABLE_MODELS.items():
+        mark = " ✅" if key == current else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{info['emoji']} {info['name']}{mark}",
+            callback_data=f"setmodel:{key}"
+        )])
+
+    await message.answer(
+        "🤖 Выбери AI модель:\n(все бесплатные, при лимите автопереключение)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("setmodel:"))
+async def callback_set_model(callback: CallbackQuery):
+    model_key = callback.data.split(":")[1]
+    set_user_model(callback.from_user.id, model_key)
+    info = AVAILABLE_MODELS.get(model_key, {})
+    await callback.answer(f"Переключился на {info.get('name', model_key)}")
+
+    current = get_user_model(callback.from_user.id)
+    buttons = []
+    for key, m in AVAILABLE_MODELS.items():
+        mark = " ✅" if key == current else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{m['emoji']} {m['name']}{mark}",
+            callback_data=f"setmodel:{key}"
+        )])
+
+    await callback.message.edit_reply_markup(
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
 

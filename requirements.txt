@@ -4,8 +4,6 @@ aiohttp==3.10.10
 aiofiles==24.1.0
 aiosqlite==0.20.0
 
-# Groq API
-groq>=0.9.0
 
 # База данных и утилиты
 python-dotenv==1.0.1

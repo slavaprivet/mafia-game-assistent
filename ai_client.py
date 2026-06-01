@@ -13,7 +13,7 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 AVAILABLE_MODELS = {
     "deepseek": {
-        "id": "deepseek/deepseek-chat-v3-0324:free",
+        "id": "deepseek/deepseek-chat:free",
         "name": "DeepSeek V3",
         "emoji": "🔵",
     },
@@ -23,18 +23,19 @@ AVAILABLE_MODELS = {
         "emoji": "🦙",
     },
     "gemini": {
-        "id": "google/gemini-flash-1.5:free",
-        "name": "Gemini Flash",
+        "id": "google/gemini-2.0-flash-exp:free",
+        "name": "Gemini 2.0 Flash",
         "emoji": "♊",
     },
-    "mistral": {
-        "id": "mistralai/mistral-7b-instruct:free",
-        "name": "Mistral 7B",
-        "emoji": "🌬",
+    "qwen": {
+        "id": "qwen/qwen-2.5-72b-instruct:free",
+        "name": "Qwen 2.5 72B",
+        "emoji": "🟣",
     },
 }
 
-FALLBACK_ORDER = ["deepseek", "llama", "gemini", "mistral"]
+FALLBACK_ORDER = ["deepseek", "llama", "gemini", "qwen"]
+
 
 _user_models: dict[int, str] = {}
 

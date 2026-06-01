@@ -228,7 +228,7 @@ async def handle_document(message: Message):
         "text/plain", "text/x-python", "application/json",
         "text/html", "text/css", "text/javascript",
     ]
-    allowed_exts = [".py", ".js", ".ts", ".lua", ".txt", ".log", ".json", ".yaml", ".yml", ".cs"]
+    allowed_exts = [".py", ".js", ".ts", ".lua", ".txt", ".log", ".json", ".yaml", ".yml", ".cs", ".html", ".css", ".jsx", ".tsx"]
 
     file_ext = Path(doc.file_name or "").suffix.lower()
     is_text = (doc.mime_type in allowed_mimes) or (file_ext in allowed_exts)
@@ -236,7 +236,7 @@ async def handle_document(message: Message):
     if not is_text:
         await message.answer(
             "📎 Могу обрабатывать только текстовые файлы:\n"
-            "`.py .js .ts .lua .txt .log .json .yaml .cs`",
+            "`.py .js .ts .lua .txt .log .json .yaml .html .css .cs`",
             parse_mode="Markdown"
         )
         return

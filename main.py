@@ -71,10 +71,6 @@ async def hourly_report(bot: Bot, user_ids: list[int]):
 async def main():
     """Основная функция запуска бота."""
 
-    # Claude API — не требует локального сервера
-    else:
-        logger.warning("⚠️ Ollama недоступна! Запусти: ollama serve")
-
     # ── Запускаем фоновые задачи ───────────────────────────────────────────
     from config import ALLOWED_USERS
     asyncio.create_task(check_reminders(bot))

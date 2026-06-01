@@ -30,6 +30,10 @@ VISION_MODEL: str = os.getenv("VISION_MODEL", "gemini-1.5-flash")
 # === ПУТИ ===
 BASE_DIR: Path = Path(__file__).parent
 GAME_REPO_PATH: Path = Path(os.getenv("GAME_REPO_PATH", str(BASE_DIR / "game_repo")))
+
+# === GITHUB ===
+GITHUB_REPO: str = os.getenv("GITHUB_REPO", "slavaprivet/mafiozy")
+GITHUB_BRANCH: str = os.getenv("GITHUB_BRANCH", "main")
 TEMP_DIR: Path = BASE_DIR / "temp"
 TEMP_DIR.mkdir(exist_ok=True)
 DB_PATH: Path = BASE_DIR / "memory.db"

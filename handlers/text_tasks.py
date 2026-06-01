@@ -216,23 +216,18 @@ async def handle_text_task(message: Message):
 
             await status_msg.edit_text(
                 ai_response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
-                parse_mode="Markdown",
                 reply_markup=keyboard
             )
         else:
-            # Просто текстовый ответ без изменений кода
             await status_msg.edit_text(
                 ai_response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
-                parse_mode="Markdown"
             )
 
     except Exception as e:
         logger.error(f"Ошибка обработки задачи {task_id}: {e}")
         await update_task(task_id, "failed")
         await status_msg.edit_text(
-            f"❌ Ошибка при обработке задачи:\n`{str(e)}`\n\n"
-            f"Попробуй ещё раз или переформулируй задачу.",
-            parse_mode="Markdown"
+            f"❌ Ошибка при обработке задачи:\n{str(e)}\n\nПопробуй ещё раз или переформулируй задачу.",
         )
 
 

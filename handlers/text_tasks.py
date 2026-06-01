@@ -16,7 +16,7 @@ from loguru import logger
 from config import ALLOWED_USERS
 from memory import save_task, update_task, add_to_conversation, get_conversation
 from ai_client import ask_code_model, count_tokens_approx
-from game_expert import search_in_code, read_relevant_files, load_index, find_related_files
+from game_expert import search_in_code, read_relevant_files, load_index, find_related_files, index_game, push_file_to_github
 from limit_manager import check_limit, track_usage
 from memory import save_reminder
 
@@ -80,6 +80,23 @@ async def handle_text_task(message: Message):
 
     # Игнорируем команды (они обрабатываются в commands.py)
     if text.startswith("/"):
+        return
+
+    # Детект "подтяни с гитхаб" — обновляем индекс
+    text_lower = text.lower()
+    if any(kw in text_lower for kw in ["подтяни", "pull", "обнови код", "обнови индекс", "свежак"]):
+        from game_expert import index_game
+        msg = await message.answer("🔄 Подтягиваю свежий код с GitHub...")
+        index = await index_game()
+        if index.get("error"):
+            await msg.edit_text(f"❌ Ошибка: {index['error']}")
+        else:
+            await msg.edit_text(
+                f"✅ Код обновлён с GitHub!\n\n"
+                f"Файлов: {index['file_count']}\n"
+                f"Строк: {index['total_lines']:,}\n"
+                f"Функций: {len(index['functions'])}"
+            )
         return
 
     # Проверяем лимит токенов

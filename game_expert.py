@@ -196,6 +196,40 @@ def find_related_files(target_file: str) -> list[str]:
     return related[:5]
 
 
+async def push_file_to_github(path: str, content: str, commit_message: str) -> tuple[bool, str]:
+    """Сохраняет файл в GitHub репозиторий. Возвращает (успех, сообщение)."""
+    if not GITHUB_TOKEN:
+        return False, "GITHUB_TOKEN не задан"
+
+    url = f"{API_BASE}/contents/{path}"
+
+    # Получаем текущий SHA файла (нужен для обновления)
+    sha = None
+    async with aiohttp.ClientSession(headers=_headers()) as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                sha = data.get("sha")
+
+        # Загружаем файл
+        import base64
+        encoded = base64.b64encode(content.encode("utf-8")).decode()
+        payload = {
+            "message": commit_message,
+            "content": encoded,
+            "branch": GITHUB_BRANCH,
+        }
+        if sha:
+            payload["sha"] = sha
+
+        async with session.put(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status in (200, 201):
+                return True, f"Файл {path} сохранён на GitHub"
+            else:
+                text = await resp.text()
+                return False, f"Ошибка GitHub API {resp.status}: {text[:200]}"
+
+
 def format_index_message() -> str:
     index = load_index()
     if not index or index.get("error"):

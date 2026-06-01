@@ -313,3 +313,23 @@ async def cmd_clear(message: Message):
         "🧹 Контекст разговора очищен.\n"
         "Теперь я не помню предыдущие сообщения этой сессии."
     )
+
+
+@router.message(Command("pull"))
+async def cmd_pull(message: Message):
+    """Подтягивает свежий код с GitHub и переиндексирует."""
+    if not is_allowed(message.from_user.id):
+        return
+
+    msg = await message.answer("🔄 Подтягиваю свежий код с GitHub...")
+    index = await index_game()
+
+    if index.get("error"):
+        await msg.edit_text(f"❌ Ошибка: {index['error']}")
+    else:
+        await msg.edit_text(
+            f"✅ Код обновлён с GitHub!\n\n"
+            f"Файлов: {index['file_count']}\n"
+            f"Строк: {index['total_lines']:,}\n"
+            f"Функций: {len(index['functions'])}"
+        )

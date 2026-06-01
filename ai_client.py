@@ -32,6 +32,11 @@ AVAILABLE_MODELS = {
         "name": "Qwen 2.5 72B",
         "emoji": "🟣",
     },
+    "claude": {
+        "id": "anthropic/claude-3.5-haiku",
+        "name": "Claude 3.5 Haiku",
+        "emoji": "🔶",
+    },
 }
 
 FALLBACK_ORDER = ["deepseek", "llama", "gemini", "qwen"]

@@ -1,0 +1,7 @@
+.env
+memory.db
+temp/
+__pycache__/
+*.pyc
+bot.log
+game_index.json

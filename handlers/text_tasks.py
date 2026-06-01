@@ -116,30 +116,30 @@ async def handle_text_task(message: Message):
         code_context = ""
 
         if index and not index.get("error"):
-            # Ищем файлы по ключевым словам из задачи
-            search_results = await search_in_code(text)
+            # Сначала ищем файлы по имени упомянутому в тексте
+            text_lower = text.lower()
+            named_files = [
+                f["path"] for f in index.get("files", [])
+                if Path(f["path"]).name.lower() in text_lower
+                or Path(f["path"]).stem.lower() in text_lower
+            ]
 
-            if search_results:
-                # Берём уникальные файлы
+            if named_files:
+                unique_files = named_files[:3]
+            else:
+                # Ищем по ключевым словам в содержимом
+                search_results = await search_in_code(text)
                 unique_files = list(dict.fromkeys(r["file"] for r in search_results[:4]))
+
+            if unique_files:
                 context_files = unique_files
-
                 await status_msg.edit_text(
-                    f"🎯 *Задача принята!*\n\n"
-                    f"📂 Нашёл {len(unique_files)} связанных файлов:\n"
-                    + "\n".join(f"• `{f}`" for f in unique_files)
-                    + "\n\n🧠 Отправляю в AI...",
-                    parse_mode="Markdown"
+                    f"Задача принята!\n\nЧитаю файлы: {', '.join(unique_files)}\n\nОтправляю в AI...",
                 )
-
-                # Читаем содержимое найденных файлов
-                code_context = await read_relevant_files(unique_files)
+                code_context = await read_relevant_files(unique_files, max_chars=15000)
             else:
                 await status_msg.edit_text(
-                    f"🎯 *Задача принята!*\n\n"
-                    f"📭 В коде не нашёл прямых совпадений.\n"
-                    f"🧠 Анализирую задачу через AI...",
-                    parse_mode="Markdown"
+                    f"Задача принята!\n\nРаботаю без контекста кода...",
                 )
         else:
             await status_msg.edit_text(
@@ -150,15 +150,22 @@ async def handle_text_task(message: Message):
             )
 
         # Шаг 2: Формируем промпт для AI
+        index_summary = ""
+        if index and not index.get("error"):
+            file_names = [f["path"] for f in index.get("files", [])]
+            index_summary = (
+                f"\n\nТы уже изучил код игры из репозитория {index.get('repo', 'mafiozy')}. "
+                f"Файлы в проекте: {', '.join(file_names)}. "
+                f"Всего {index.get('file_count', 0)} файлов, {index.get('total_lines', 0)} строк кода."
+            )
+
         system_prompt = (
-            "Ты опытный разработчик игр. Анализируй задачи и ошибки, "
-            "предлагай конкретные решения с кодом. "
-            "Всегда объясняй ЧТО делает код и ПОЧЕМУ именно так. "
-            "Отвечай на русском языке. "
+            "Ты опытный разработчик игр, помощник по разработке игры Мафиози. "
+            "Анализируй задачи и ошибки, предлагай конкретные решения с кодом. "
+            "Отвечай коротко и по делу, на русском языке. "
             "Когда предлагаешь изменение кода, форматируй так:\n"
-            "❌ БЫЛО:\n```\nстарый код\n```\n"
-            "✅ СТАЛО:\n```\nновый код\n```\n"
-            "📁 Файл: имя_файла.py"
+            "БЫЛО:\nстарый код\n\nСТАЛО:\nновый код\n\nФайл: имя_файла"
+            + index_summary
         )
 
         # Добавляем контекст кода если есть

@@ -8,22 +8,18 @@ import sys
 from pathlib import Path
 from loguru import logger
 
-# Добавляем корневую папку в путь (для импортов)
 sys.path.insert(0, str(Path(__file__).parent))
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from config import BOT_TOKEN, HOURLY_REPORTS, validate_config
+from config import BOT_TOKEN, HOURLY_REPORTS, ALLOWED_USERS, validate_config
 from memory import init_db
-from game_expert import index_game, load_index
 
 
 async def check_reminders(bot: Bot):
-    """Фоновая задача: проверяет напоминания каждую минуту."""
     from memory import get_pending_reminders, mark_reminder_done
-
     while True:
         try:
             reminders = await get_pending_reminders()
@@ -39,16 +35,12 @@ async def check_reminders(bot: Bot):
                     logger.error(f"Не могу отправить напоминание {reminder['id']}: {e}")
         except Exception as e:
             logger.error(f"Ошибка проверки напоминаний: {e}")
+        await asyncio.sleep(60)
 
-        await asyncio.sleep(60)  # Проверяем каждую минуту
 
-
-async def hourly_report(bot: Bot, user_ids: list[int]):
-    """Фоновая задача: ежечасный отчёт."""
+async def hourly_report(bot: Bot, user_ids: list):
     from memory import get_stats
-
-    await asyncio.sleep(3600)  # Первый отчёт через час после запуска
-
+    await asyncio.sleep(3600)
     while True:
         try:
             for user_id in user_ids:
@@ -64,27 +56,31 @@ async def hourly_report(bot: Bot, user_ids: list[int]):
                     )
         except Exception as e:
             logger.error(f"Ошибка отправки отчёта: {e}")
-
-        await asyncio.sleep(3600)  # Каждый час
+        await asyncio.sleep(3600)
 
 
 async def main():
-    """Основная функция запуска бота."""
+    validate_config()
+    await init_db()
 
-    # ── Запускаем фоновые задачи ───────────────────────────────────────────
-    from config import ALLOWED_USERS
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    dp = Dispatcher()
+
+    from handlers import commands, text_tasks, media_tasks
+    dp.include_router(commands.router)
+    dp.include_router(text_tasks.router)
+    dp.include_router(media_tasks.router)
+
     asyncio.create_task(check_reminders(bot))
     if HOURLY_REPORTS and ALLOWED_USERS:
         asyncio.create_task(hourly_report(bot, ALLOWED_USERS))
 
-    # ── Старт! ─────────────────────────────────────────────────────────────
     me = await bot.get_me()
-    logger.info(f"✅ Бот @{me.username} запущен! Жду сообщений...")
-    print(f"\n✅ Бот @{me.username} запущен!")
-    print(f"   Telegram: https://t.me/{me.username}")
-    print(f"   Нажми Ctrl+C для остановки\n")
+    logger.info(f"✅ Бот @{me.username} запущен!")
 
-    # Запускаем polling
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:

@@ -6,7 +6,7 @@ import json
 import aiohttp
 from pathlib import Path
 from loguru import logger
-from config import BASE_DIR, GITHUB_REPO, GITHUB_BRANCH
+from config import BASE_DIR, GITHUB_REPO, GITHUB_BRANCH, GITHUB_TOKEN
 
 INDEX_FILE = BASE_DIR / "game_index.json"
 
@@ -21,10 +21,17 @@ RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
 API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}"
 
 
+def _headers() -> dict:
+    h = {"Accept": "application/vnd.github+json"}
+    if GITHUB_TOKEN:
+        h["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    return h
+
+
 async def _fetch_tree() -> list[dict]:
     """Получает список всех файлов репозитория через GitHub API."""
     url = f"{API_BASE}/git/trees/{GITHUB_BRANCH}?recursive=1"
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=_headers()) as session:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             if resp.status != 200:
                 logger.error(f"GitHub API error: {resp.status}")
@@ -41,7 +48,7 @@ async def _fetch_tree() -> list[dict]:
 async def _fetch_file(path: str) -> str:
     """Читает содержимое файла из GitHub."""
     url = f"{RAW_BASE}/{path}"
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=_headers()) as session:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 return await resp.text(errors="ignore")

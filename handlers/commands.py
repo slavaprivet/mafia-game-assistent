@@ -358,6 +358,51 @@ async def callback_set_model(callback: CallbackQuery):
     )
 
 
+@router.message(Command("testmodels"))
+async def cmd_testmodels(message: Message):
+    """Проверяет какие модели OpenRouter реально доступны."""
+    if not is_allowed(message.from_user.id):
+        return
+
+    import aiohttp
+    from config import OPENROUTER_API_KEY
+
+    msg = await message.answer("🔍 Проверяю доступные бесплатные модели на OpenRouter...")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                data = await resp.json()
+
+        if resp.status != 200:
+            await msg.edit_text(f"❌ Ошибка API: {resp.status}\n{data}")
+            return
+
+        free_models = [
+            m for m in data.get("data", [])
+            if ":free" in m.get("id", "") or m.get("pricing", {}).get("prompt") == "0"
+        ]
+
+        if not free_models:
+            await msg.edit_text("😶 Бесплатных моделей не найдено.")
+            return
+
+        lines = [f"✅ Доступных бесплатных моделей: {len(free_models)}\n"]
+        for m in free_models[:20]:
+            lines.append(f"• `{m['id']}`")
+        if len(free_models) > 20:
+            lines.append(f"\n...и ещё {len(free_models) - 20}")
+
+        await msg.edit_text("\n".join(lines), parse_mode="Markdown")
+
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}")
+
+
 @router.message(Command("pull"))
 async def cmd_pull(message: Message):
     """Подтягивает свежий код с GitHub и переиндексирует."""

@@ -232,6 +232,9 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
 
         # Показываем результат
         has_change = _detect_code_change(ai_response)
+        # Очищаем ответ от символов которые ломают Telegram HTML-парсер
+        safe_response = ai_response.replace("<", "&lt;").replace(">", "&gt;")
+
         if has_change:
             change_info = _parse_code_change(ai_response)
             pending_changes[task_id] = {
@@ -241,12 +244,14 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                 "full_response": ai_response,
             }
             await status_msg.edit_text(
-                ai_response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
-                reply_markup=_change_keyboard(task_id)
+                safe_response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
+                reply_markup=_change_keyboard(task_id),
+                parse_mode=None
             )
         else:
             await status_msg.edit_text(
-                ai_response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
+                safe_response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
+                parse_mode=None
             )
 
     except asyncio.CancelledError:

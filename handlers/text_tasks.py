@@ -81,6 +81,21 @@ def _is_reminder_request(text: str) -> tuple[bool, str, datetime | None]:
     return remind_time is not None, text, remind_time
 
 
+async def _heartbeat(status_msg: Message, base_text: str, task_id: int, interval: int = 5):
+    """Каждые N секунд обновляет статус — чтобы было видно что бот жив."""
+    elapsed = 0
+    while True:
+        await asyncio.sleep(interval)
+        elapsed += interval
+        try:
+            await status_msg.edit_text(
+                f"{base_text}\n⏱ {elapsed} сек...",
+                reply_markup=_stop_keyboard(task_id)
+            )
+        except Exception:
+            pass  # Сообщение могло быть удалено — не страшно
+
+
 def _detect_code_change(response: str) -> bool:
     indicators = ["БЫЛО:", "СТАЛО:", "Файл:", "```python", "```js", "```lua", "```html", "```javascript"]
     return any(ind in response for ind in indicators)
@@ -189,20 +204,27 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
         await add_to_conversation(user_id, "user", text)
         history = await get_conversation(user_id, limit=10)
 
-        # Шаг 3: AI думает
-        await status_msg.edit_text(
+        # Шаг 3: AI думает — запускаем пульс чтобы не казалось зависшим
+        files_str = ', '.join(Path(f).name for f in context_files) if context_files else 'без контекста'
+        thinking_text = (
             f"⚙️ Принял задачу\n"
-            f"{'📄 ' + ', '.join(Path(f).name for f in context_files) if context_files else '📭 без контекста'}\n"
-            f"{model_info['emoji']} Шаг 3/3: {model_info['name']} думает...",
-            reply_markup=_stop_keyboard(task_id)
+            f"📄 {files_str}\n"
+            f"{model_info['emoji']} {model_info['name']} думает..."
         )
+        await status_msg.edit_text(thinking_text, reply_markup=_stop_keyboard(task_id))
 
-        ai_response, tokens_used = await ask_code_model(
-            full_prompt,
-            system_prompt=system_prompt,
-            conversation_history=history[:-1],
-            user_id=user_id,
+        heartbeat = asyncio.create_task(
+            _heartbeat(status_msg, thinking_text, task_id, interval=5)
         )
+        try:
+            ai_response, tokens_used = await ask_code_model(
+                full_prompt,
+                system_prompt=system_prompt,
+                conversation_history=history[:-1],
+                user_id=user_id,
+            )
+        finally:
+            heartbeat.cancel()
 
         await add_to_conversation(user_id, "assistant", ai_response)
         await track_usage(user_id, tokens_used)

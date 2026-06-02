@@ -23,13 +23,13 @@ AVAILABLE_MODELS = {
         "emoji": "🦙",
     },
     "gemini": {
-        "id": "google/gemini-2.0-flash-exp:free",
-        "name": "Gemini 2.0 Flash",
+        "id": "google/gemini-2.5-flash-preview:free",
+        "name": "Gemini 2.5 Flash",
         "emoji": "♊",
     },
     "qwen": {
-        "id": "qwen/qwen-2.5-72b-instruct:free",
-        "name": "Qwen 2.5 72B",
+        "id": "qwen/qwq-32b:free",
+        "name": "Qwen QwQ 32B",
         "emoji": "🟣",
     },
     "claude": {

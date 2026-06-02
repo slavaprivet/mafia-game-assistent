@@ -87,7 +87,8 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
     t = text.lower().strip()
 
     # ── ПОИСК КОДА ────────────────────────────────────────
-    find_kws = ["найди", "где находится", "покажи код", "find ", "где функция", "найти"]
+    # Только явные команды поиска — не перехватываем "найти способ" или "найти баг"
+    find_kws = ["найди код", "найди функцию", "где находится", "покажи код", "где функция", "найди в коде", "find code"]
     if any(kw in t for kw in find_kws):
         # Убираем ключевые слова, оставляем запрос
         query = t
@@ -123,8 +124,9 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
         return True
 
     # ── ИСТОРИЯ ИЗМЕНЕНИЙ ──────────────────────────────────
-    changes_kws = ["что менял", "история", "мои изменения", "что изменил", "последние правки",
-                   "что ты делал", "что сделал", "покажи изменения"]
+    # Убрали "история" и "что сделал" — слишком широкие, ловили вопросы о лоре игры и коде
+    changes_kws = ["что менял", "история изменений", "мои изменения", "что изменил",
+                   "последние правки", "покажи изменения", "что ты делал с кодом"]
     if any(kw in t for kw in changes_kws):
         changes = await get_changes_with_rollback(user_id, limit=6)
         if not changes:
@@ -194,8 +196,9 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
         return True
 
     # ── СМЕНА МОДЕЛИ ──────────────────────────────────────
+    # Убрали "модели" — ловило вопросы про 3D-модели в игре
     model_kws = ["смени модель", "поменяй модель", "какая модель", "список моделей",
-                 "модели", "выбери модель", "переключи модель"]
+                 "выбери модель", "переключи модель", "сменить модель", "какой ai"]
     if any(kw in t for kw in model_kws):
         current = get_user_model(user_id)
         buttons = []
@@ -212,7 +215,7 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
         return True
 
     # ── СТАТИСТИКА ────────────────────────────────────────
-    stats_kws = ["статистика", "сколько токенов", "мои токены", "сколько запросов"]
+    stats_kws = ["моя статистика", "сколько токенов", "мои токены", "сколько запросов", "покажи статистику"]
     if any(kw in t for kw in stats_kws):
         from memory import get_stats
         stats = await get_stats(user_id)
@@ -337,28 +340,34 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
 
         index_summary = ""
         if index and not index.get("error"):
-            file_names = [f["path"] for f in index.get("files", [])]
+            file_names = [Path(f["path"]).name for f in index.get("files", [])]
             index_summary = (
-                f"\n\nКод игры из репозитория {index.get('repo', 'mafiozy')}: "
-                f"{', '.join(file_names)}. "
-                f"{index.get('file_count', 0)} файлов, {index.get('total_lines', 0)} строк."
+                f"\n\nВ проекте {index.get('file_count', 0)} файлов: {', '.join(file_names[:10])}."
             )
 
         system_prompt = (
-            "Ты разработчик игры Мафиози. Отвечай КРАТКО — максимум 8 строк. "
-            "Только суть + готовый код. Без длинных объяснений. "
-            "Язык: русский. "
-            "Структура проекта: world.html — ГЛАВНЫЙ файл (открытый мир), "
-            "hub.html — хаб, battle.html — бой, creator.html — редактор. "
-            "Работай с world.html по умолчанию если не указано иное. "
-            "Формат изменения:\n"
+            "Ты опытный разработчик игры «Мафиози» — изометрический открытый мир на JavaScript/HTML.\n"
+            "Общаешься как живой напарник по разработке, на русском языке.\n\n"
+            "Как отвечать:\n"
+            "• На простой вопрос — отвечай по-человечески, без шаблонов (2–5 предложений)\n"
+            "• Если что-то непонятно — уточни, не угадывай\n"
+            "• Если нужен код — дай конкретный рабочий код + одна строка зачем\n"
+            "• Можешь предложить идею, заметить проблему, спросить «а зачем?»\n"
+            "• Не пиши вступления: 'Конечно!', 'Отличный вопрос!', 'Понял вас!'\n"
+            "• Пиши как человек, а не как документация\n\n"
+            "Структура проекта:\n"
+            "• world.html — ГЛАВНЫЙ файл (открытый мир), используй по умолчанию\n"
+            "• hub.html — хаб города, battle.html — бой, creator.html — редактор\n\n"
+            "Когда предлагаешь изменение кода:\n"
             "БЫЛО:\n```\nстарый код\n```\nСТАЛО:\n```\nновый код\n```\nФайл: имя_файла"
             + index_summary
         )
 
+        # Передаём текст пользователя как есть — не оборачиваем в "Задача:",
+        # чтобы AI воспринимал это как разговор, а не тикет
         full_prompt = text
         if code_context:
-            full_prompt = f"Задача: {text}\n\nКод из проекта:\n{code_context}"
+            full_prompt = f"{text}\n\n[Релевантный код из проекта]\n{code_context}"
 
         await add_to_conversation(user_id, "user", text)
         history = await get_conversation(user_id, limit=8)

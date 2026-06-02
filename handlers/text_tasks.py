@@ -142,11 +142,25 @@ async def handle_text_task(message: Message):
                 or Path(f["path"]).stem.lower() in text_lower
             ]
 
+            # Главный файл — world, добавляем его первым если не упомянут другой
+            world_files = [
+                f["path"] for f in index.get("files", [])
+                if "world" in Path(f["path"]).stem.lower()
+            ]
+
             if named_files:
                 unique_files = named_files[:3]
             else:
                 search_results = await search_in_code(text)
-                unique_files = list(dict.fromkeys(r["file"] for r in search_results[:4]))
+                found = list(dict.fromkeys(r["file"] for r in search_results[:4]))
+                # Если нашли только battle/второстепенные — добавляем world
+                if world_files and not any("world" in f.lower() for f in found):
+                    found = world_files[:1] + [f for f in found if "battle" not in f.lower()][:2]
+                unique_files = found[:3]
+
+            # Если вообще ничего не нашли — берём world
+            if not unique_files and world_files:
+                unique_files = world_files[:1]
 
             if unique_files:
                 context_files = unique_files
@@ -181,6 +195,9 @@ async def handle_text_task(message: Message):
             "Ты опытный разработчик игр, помощник по разработке игры Мафиози. "
             "Анализируй задачи и ошибки, предлагай конкретные решения с кодом. "
             "Отвечай коротко и по делу, на русском языке. "
+            "ВАЖНО: основной файл игры — world (world.html или похожее название). "
+            "battle.htm — это второстепенный файл, не трогай его если задача не касается battle явно. "
+            "Всегда работай с world-файлом если не указано иное. "
             "Когда предлагаешь изменение кода, форматируй так:\n"
             "БЫЛО:\nстарый код\n\nСТАЛО:\nновый код\n\nФайл: имя_файла"
             + index_summary

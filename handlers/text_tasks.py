@@ -147,7 +147,7 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                     f"📄 Шаг 2/3: читаю {', '.join(short_names)}...",
                     reply_markup=_stop_keyboard(task_id)
                 )
-                code_context = await read_relevant_files(unique_files, max_chars=15000)
+                code_context = await read_relevant_files(unique_files, max_chars=12000, query=text)
             else:
                 await status_msg.edit_text(
                     f"⚙️ Принял задачу\n📭 Файлы не найдены, работаю без контекста",

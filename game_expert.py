@@ -3,10 +3,15 @@
 """
 
 import json
+import time
 import aiohttp
 from pathlib import Path
 from loguru import logger
 from config import BASE_DIR, GITHUB_REPO, GITHUB_BRANCH, GITHUB_TOKEN
+
+# Кеш файлов в памяти: path -> (content, timestamp)
+_file_cache: dict[str, tuple[str, float]] = {}
+CACHE_TTL = 300  # 5 минут
 
 INDEX_FILE = BASE_DIR / "game_index.json"
 
@@ -46,12 +51,20 @@ async def _fetch_tree() -> list[dict]:
 
 
 async def _fetch_file(path: str) -> str:
-    """Читает содержимое файла из GitHub."""
+    """Читает содержимое файла из GitHub (с кешем 5 мин)."""
+    now = time.time()
+    if path in _file_cache:
+        content, ts = _file_cache[path]
+        if now - ts < CACHE_TTL:
+            return content
+
     url = f"{RAW_BASE}/{path}"
     async with aiohttp.ClientSession(headers=_headers()) as session:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
-                return await resp.text(errors="ignore")
+                content = await resp.text(errors="ignore")
+                _file_cache[path] = (content, now)
+                return content
             return ""
 
 
@@ -164,21 +177,63 @@ async def search_in_code(query: str) -> list[dict]:
     return results
 
 
-async def read_relevant_files(file_paths: list[str], max_chars: int = 30000) -> str:
-    """Читает содержимое файлов из GitHub."""
+async def read_relevant_files(file_paths: list[str], max_chars: int = 12000, query: str = "") -> str:
+    """
+    Читает только релевантные куски файлов (не весь файл).
+    Если есть query — вырезает контекст вокруг совпадений.
+    Без query — берёт первые N строк.
+    """
     result = []
     total_chars = 0
+    context_lines = 60  # строк вокруг совпадения
 
     for path in file_paths:
+        if total_chars >= max_chars:
+            break
+
         content = await _fetch_file(path)
         if not content:
             continue
-        if total_chars + len(content) > max_chars:
-            content = content[:max_chars - total_chars]
-            result.append(f"\n--- {path} (обрезан) ---\n{content}")
-            break
-        result.append(f"\n--- {path} ---\n{content}")
-        total_chars += len(content)
+
+        lines = content.splitlines()
+        file_budget = min(max_chars - total_chars, max_chars // len(file_paths))
+
+        if query:
+            # Находим строки с совпадениями
+            query_lower = query.lower()
+            keywords = [w for w in query_lower.split() if len(w) > 3]
+            hit_lines = set()
+            for i, line in enumerate(lines):
+                line_lower = line.lower()
+                if any(kw in line_lower for kw in keywords):
+                    # Берём контекст вокруг совпадения
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines)
+                    hit_lines.update(range(start, end))
+
+            if hit_lines:
+                # Собираем нужные строки с разделителями
+                selected = []
+                prev = -2
+                for i in sorted(hit_lines):
+                    if i > prev + 1:
+                        selected.append(f"... (строка {i+1}) ...")
+                    selected.append(lines[i])
+                    prev = i
+                snippet = "\n".join(selected)
+            else:
+                # Нет совпадений — берём начало файла
+                snippet = "\n".join(lines[:80])
+        else:
+            # Без query — первые 80 строк
+            snippet = "\n".join(lines[:80])
+
+        # Обрезаем по бюджету символов
+        if len(snippet) > file_budget:
+            snippet = snippet[:file_budget] + "\n... (обрезано)"
+
+        result.append(f"\n--- {path} ({len(lines)} строк, показан фрагмент) ---\n{snippet}")
+        total_chars += len(snippet)
 
     return "\n".join(result)
 

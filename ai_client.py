@@ -37,9 +37,14 @@ AVAILABLE_MODELS = {
         "name": "Claude 3.5 Haiku",
         "emoji": "🔶",
     },
+    "deepseek": {
+        "id": "deepseek/deepseek-chat:free",
+        "name": "DeepSeek V3",
+        "emoji": "🔵",
+    },
 }
 
-FALLBACK_ORDER = ["gpt", "qwen", "nvidia", "gemma"]
+FALLBACK_ORDER = ["gpt", "qwen", "nvidia", "gemma", "deepseek"]
 
 
 _user_models: dict[int, str] = {}

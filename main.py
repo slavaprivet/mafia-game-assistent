@@ -69,10 +69,11 @@ async def main():
     )
     dp = Dispatcher()
 
-    from handlers import commands, text_tasks, media_tasks
+    from handlers import commands, text_tasks, media_tasks, callbacks
     dp.include_router(commands.router)
     dp.include_router(text_tasks.router)
     dp.include_router(media_tasks.router)
+    dp.include_router(callbacks.router)
 
     asyncio.create_task(check_reminders(bot))
     if HOURLY_REPORTS and ALLOWED_USERS:

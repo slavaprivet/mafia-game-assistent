@@ -51,7 +51,7 @@ _user_models: dict[int, str] = {}
 
 
 def get_user_model(user_id: int) -> str:
-    return _user_models.get(user_id, "deepseek")
+    return _user_models.get(user_id, "gpt")
 
 
 def set_user_model(user_id: int, model_key: str):
@@ -60,7 +60,7 @@ def set_user_model(user_id: int, model_key: str):
 
 
 def get_model_info(model_key: str) -> dict:
-    return AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS["deepseek"])
+    return AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS["gpt"])
 
 
 class RateLimitError(Exception):

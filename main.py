@@ -78,6 +78,18 @@ async def main():
     if HOURLY_REPORTS and ALLOWED_USERS:
         asyncio.create_task(hourly_report(bot, ALLOWED_USERS))
 
+    # Автоматически индексируем игру при старте
+    try:
+        from game_expert import index_game
+        logger.info("📚 Индексирую игру с GitHub...")
+        index = await index_game()
+        if index.get("error"):
+            logger.warning(f"Индекс не загружен: {index['error']}")
+        else:
+            logger.info(f"✅ Игра проиндексирована: {index['file_count']} файлов, {index['total_lines']} строк")
+    except Exception as e:
+        logger.error(f"Ошибка автоиндексации: {e}")
+
     me = await bot.get_me()
     logger.info(f"✅ Бот @{me.username} запущен!")
 

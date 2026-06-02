@@ -17,7 +17,13 @@ from handlers.text_tasks import pending_changes
 
 router = Router()
 
-GITHUB_PAGES_URL = f"https://{GITHUB_REPO.split('/')[0]}.github.io/{GITHUB_REPO.split('/')[1]}/"
+_owner, _repo = GITHUB_REPO.split("/")
+GITHUB_PAGES_BASE = f"https://{_owner}.github.io/{_repo}"
+
+
+def _preview_url(file_path: str) -> str:
+    """Возвращает ссылку на GitHub Pages для конкретного файла."""
+    return f"{GITHUB_PAGES_BASE}/{file_path}"
 
 
 async def _apply_via_github(file_path: str, old_code: str | None, new_code: str, task_id: int) -> tuple[bool, str]:
@@ -83,11 +89,12 @@ async def callback_apply(callback: CallbackQuery):
             diff=change.get("new_code", "")[:500],
         )
         file_url = f"https://github.com/{GITHUB_REPO}/blob/{GITHUB_BRANCH}/{change['file']}"
+        preview = _preview_url(change["file"])
         await callback.message.answer(
             f"✅ Изменение применено!\n\n"
             f"📄 Файл: {change['file']}\n"
-            f"🔗 Код на GitHub: {file_url}\n\n"
-            f"🌐 Проверь игру:\n{GITHUB_PAGES_URL}"
+            f"🔗 Код: {file_url}\n\n"
+            f"🌐 Тест (через ~1 мин):\n{preview}"
         )
     else:
         await callback.message.answer(f"❌ {msg}")

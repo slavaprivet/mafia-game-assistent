@@ -7,6 +7,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import html
 import re
 import time
 import asyncio
@@ -50,7 +51,7 @@ def _change_keyboard(task_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📝 Показать файл", callback_data=f"showfile:{task_id}"),
         ],
         [
-            InlineKeyboardButton(text="🌿 Тест", callback_data=f"branch:{task_id}"),
+            InlineKeyboardButton(text="🌐 Превью", callback_data=f"branch:{task_id}"),
             InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{task_id}"),
         ]
     ])
@@ -109,8 +110,8 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
             for i, line in enumerate(lines):
                 if query in line.lower():
                     start, end = max(0, i-2), min(len(lines), i+12)
-                    snippet = "\n".join(lines[start:end])[:600]
-                    found.append(f"📄 {fi['path']}:{i+1}\n<pre>{snippet}</pre>")
+                    snippet = html.escape("\n".join(lines[start:end])[:600])
+                    found.append(f"📄 <code>{html.escape(fi['path'])}:{i+1}</code>\n<pre>{snippet}</pre>")
                     if len(found) >= 3:
                         break
             if len(found) >= 3:
@@ -428,28 +429,6 @@ async def callback_stop_task(callback: CallbackQuery):
     else:
         await callback.message.edit_reply_markup()
     await callback.answer("Остановлено")
-
-
-@router.callback_query(lambda c: c.data.startswith("setmodel:"))
-async def callback_set_model(callback: CallbackQuery):
-    model_key = callback.data.split(":")[1]
-    set_user_model(callback.from_user.id, model_key)
-    info = AVAILABLE_MODELS.get(model_key, {})
-    await callback.answer(f"Переключился на {info.get('name', model_key)}")
-    current = get_user_model(callback.from_user.id)
-    buttons = []
-    for key, m in AVAILABLE_MODELS.items():
-        mark = " ✅" if key == current else ""
-        buttons.append([InlineKeyboardButton(
-            text=f"{m['emoji']} {m['name']}{mark}",
-            callback_data=f"setmodel:{key}"
-        )])
-    try:
-        await callback.message.edit_reply_markup(
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
-    except Exception:
-        pass
 
 
 @router.callback_query(lambda c: c.data.startswith("todo_done:"))

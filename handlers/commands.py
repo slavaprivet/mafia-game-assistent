@@ -2,6 +2,7 @@
 Обработчики команд: /start, /help, /stats, /limits, /git, /index, /search, /reminders, /clear
 """
 
+import html
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -356,9 +357,12 @@ async def callback_set_model(callback: CallbackQuery):
             callback_data=f"setmodel:{key}"
         )])
 
-    await callback.message.edit_reply_markup(
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+    except Exception:
+        pass
 
 
 @router.message(Command("testmodels"))
@@ -461,8 +465,8 @@ async def cmd_find(message: Message):
             if query.lower() in line.lower():
                 start = max(0, i - 3)
                 end = min(len(lines), i + 15)
-                snippet = "\n".join(lines[start:end])
-                found_blocks.append(f"📄 {file_info['path']}:{i+1}\n<pre>{snippet[:800]}</pre>")
+                snippet = html.escape("\n".join(lines[start:end])[:800])
+                found_blocks.append(f"📄 <code>{html.escape(file_info['path'])}:{i+1}</code>\n<pre>{snippet}</pre>")
                 if len(found_blocks) >= 3:
                     break
         if len(found_blocks) >= 3:

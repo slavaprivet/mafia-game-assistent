@@ -2,6 +2,7 @@
 Обработчик inline-кнопок — применение/откат изменений через GitHub API.
 """
 
+import html
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -84,7 +85,6 @@ async def callback_apply(callback: CallbackQuery):
             description=change.get("description", "")[:100],
             diff=change.get("new_code", "")[:500],
         )
-        # Сохраняем старый контент для отката
         if old_content and change_id_row:
             await save_rollback(change_id_row, change["file"], old_content)
 
@@ -158,12 +158,17 @@ async def callback_showfile(callback: CallbackQuery):
         await callback.message.answer(f"❌ Не удалось прочитать {file_path}")
         return
 
-    preview = content[:3000] + (f"\n...ещё {len(content)-3000} символов" if len(content) > 3000 else "")
-    await callback.message.answer(f"📄 {file_path}\n\n<pre>{preview}</pre>")
+    # Экранируем HTML чтобы код отображался как текст, не ломал парсер
+    safe_content = html.escape(content[:3000])
+    suffix = f"\n...ещё {len(content)-3000} символов" if len(content) > 3000 else ""
+    await callback.message.answer(
+        f"📄 <code>{html.escape(file_path)}</code>\n\n<pre>{safe_content}{suffix}</pre>"
+    )
 
 
 @router.callback_query(lambda c: c.data.startswith("branch:"))
 async def callback_branch(callback: CallbackQuery):
+    """Показывает превью на GitHub Pages без применения изменений."""
     task_id = int(callback.data.split(":")[1])
     change_data = pending_changes.get(task_id)
 
@@ -171,20 +176,23 @@ async def callback_branch(callback: CallbackQuery):
         await callback.answer("❌ Задача не найдена")
         return
 
-    await callback.answer("⏳ Применяю...")
+    await callback.answer()
     change = change_data["change"]
+    file_path = change.get("file", "")
 
-    if change.get("file") and change.get("new_code"):
-        ok, msg, _ = await _apply_via_github(
-            change["file"], change.get("old_code"), change["new_code"], task_id
+    if file_path:
+        preview = _preview_url(file_path)
+        file_url = f"https://github.com/{GITHUB_REPO}/blob/{GITHUB_BRANCH}/{file_path}"
+        await callback.message.answer(
+            f"🌐 Текущая версия на GitHub Pages:\n{preview}\n\n"
+            f"🔗 Код: {file_url}\n\n"
+            f"Нажми ✅ Применить чтобы внести изменение."
         )
-        result = f"✅ {msg}\n🌐 {_preview_url(change['file'])}" if ok else f"❌ {msg}"
     else:
-        result = "⚠️ Файл или код не определён"
-
-    await callback.message.edit_reply_markup()
-    await callback.message.answer(f"🌿 Тест-применение:\n\n{result}")
-    del pending_changes[task_id]
+        await callback.message.answer(
+            "⚠️ Файл не определён в ответе AI.\n"
+            "Посмотри ответ выше и примени вручную."
+        )
 
 
 @router.callback_query(lambda c: c.data.startswith("reject:"))
@@ -195,12 +203,3 @@ async def callback_reject(callback: CallbackQuery):
     await callback.answer("❌ Отклонено")
     await callback.message.edit_reply_markup()
     await callback.message.answer("❌ Отклонено. Опиши иначе если нужно другое решение.")
-
-
-@router.callback_query(lambda c: c.data.startswith("todo_done:"))
-async def callback_todo_done(callback: CallbackQuery):
-    from memory import mark_todo_done
-    todo_id = int(callback.data.split(":")[1])
-    await mark_todo_done(todo_id)
-    await callback.answer("✅ Отмечено выполненным")
-    await callback.message.edit_reply_markup()

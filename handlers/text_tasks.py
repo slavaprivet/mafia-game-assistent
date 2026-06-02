@@ -16,7 +16,7 @@ from loguru import logger
 
 from config import ALLOWED_USERS
 from memory import save_task, update_task, add_to_conversation, get_conversation
-from ai_client import ask_code_model, count_tokens_approx
+from ai_client import ask_code_model, count_tokens_approx, get_user_model, get_model_info
 from game_expert import search_in_code, read_relevant_files, load_index, find_related_files, index_game, push_file_to_github
 from limit_manager import check_limit, track_usage
 from memory import save_reminder
@@ -120,11 +120,12 @@ async def handle_text_task(message: Message):
     # Сохраняем задачу в БД
     task_id = await save_task(user_id, "text", text)
 
-    # Отправляем статусное сообщение
+    # Определяем текущую модель пользователя
+    model_key = get_user_model(user_id)
+    model_info = get_model_info(model_key)
+
     status_msg = await message.answer(
-        f"🎯 *Задача принята!*\n\n"
-        f"🔍 Ищу связанный код...",
-        parse_mode="Markdown"
+        f"⚙️ Принял задачу\n🔍 Шаг 1/3: ищу связанный код..."
     )
 
     try:
@@ -134,7 +135,6 @@ async def handle_text_task(message: Message):
         code_context = ""
 
         if index and not index.get("error"):
-            # Сначала ищем файлы по имени упомянутому в тексте
             text_lower = text.lower()
             named_files = [
                 f["path"] for f in index.get("files", [])
@@ -145,26 +145,26 @@ async def handle_text_task(message: Message):
             if named_files:
                 unique_files = named_files[:3]
             else:
-                # Ищем по ключевым словам в содержимом
                 search_results = await search_in_code(text)
                 unique_files = list(dict.fromkeys(r["file"] for r in search_results[:4]))
 
             if unique_files:
                 context_files = unique_files
+                short_names = [Path(f).name for f in unique_files]
                 await status_msg.edit_text(
-                    f"Задача принята!\n\nЧитаю файлы: {', '.join(unique_files)}\n\nОтправляю в AI...",
+                    f"⚙️ Принял задачу\n"
+                    f"📄 Шаг 2/3: читаю {', '.join(short_names)}..."
                 )
                 code_context = await read_relevant_files(unique_files, max_chars=15000)
             else:
                 await status_msg.edit_text(
-                    f"Задача принята!\n\nРаботаю без контекста кода...",
+                    f"⚙️ Принял задачу\n"
+                    f"📭 Код не найден — работаю без контекста"
                 )
         else:
             await status_msg.edit_text(
-                f"🎯 *Задача принята!*\n\n"
-                f"📭 Игра не проиндексирована (/index)\n"
-                f"🧠 Работаю без контекста кода...",
-                parse_mode="Markdown"
+                f"⚙️ Принял задачу\n"
+                f"📭 Игра не проиндексирована — запусти /index"
             )
 
         # Шаг 2: Формируем промпт для AI
@@ -186,7 +186,6 @@ async def handle_text_task(message: Message):
             + index_summary
         )
 
-        # Добавляем контекст кода если есть
         full_prompt = text
         if code_context:
             full_prompt = (
@@ -194,13 +193,16 @@ async def handle_text_task(message: Message):
                 f"Контекст проекта (связанный код):\n{code_context}"
             )
 
-        # Добавляем сообщение в историю разговора
         await add_to_conversation(user_id, "user", text)
-
-        # Получаем историю для контекста
         history = await get_conversation(user_id, limit=10)
 
-        # Шаг 3: Отправляем в AI
+        # Шаг 3: Отправляем в AI — показываем какая модель думает
+        await status_msg.edit_text(
+            f"⚙️ Принял задачу\n"
+            f"{'📄 ' + ', '.join(Path(f).name for f in context_files) if context_files else '📭 без контекста'}\n"
+            f"{model_info['emoji']} Шаг 3/3: {model_info['name']} думает..."
+        )
+
         ai_response, tokens_used = await ask_code_model(
             full_prompt,
             system_prompt=system_prompt,

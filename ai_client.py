@@ -12,25 +12,25 @@ from config import OPENROUTER_API_KEY, MAX_CONTEXT_SIZE
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 AVAILABLE_MODELS = {
-    "deepseek": {
-        "id": "deepseek/deepseek-chat:free",
-        "name": "DeepSeek V3",
-        "emoji": "🔵",
-    },
-    "llama": {
-        "id": "meta-llama/llama-3.3-70b-instruct:free",
-        "name": "Llama 3.3 70B",
-        "emoji": "🦙",
-    },
-    "gemini": {
-        "id": "google/gemini-2.5-flash-preview:free",
-        "name": "Gemini 2.5 Flash",
-        "emoji": "♊",
+    "gpt": {
+        "id": "openai/gpt-oss-120b:free",
+        "name": "GPT OSS 120B",
+        "emoji": "🟢",
     },
     "qwen": {
-        "id": "qwen/qwq-32b:free",
-        "name": "Qwen QwQ 32B",
+        "id": "qwen/qwen3-next-80b-a3b-instruct:free",
+        "name": "Qwen3 80B",
         "emoji": "🟣",
+    },
+    "nvidia": {
+        "id": "nvidia/nemotron-3-super-120b-a12b:free",
+        "name": "Nemotron 120B",
+        "emoji": "🔵",
+    },
+    "gemma": {
+        "id": "google/gemma-4-31b-it:free",
+        "name": "Gemma 4 31B",
+        "emoji": "♊",
     },
     "claude": {
         "id": "anthropic/claude-3.5-haiku",
@@ -39,7 +39,7 @@ AVAILABLE_MODELS = {
     },
 }
 
-FALLBACK_ORDER = ["deepseek", "llama", "gemini", "qwen"]
+FALLBACK_ORDER = ["gpt", "qwen", "nvidia", "gemma"]
 
 
 _user_models: dict[int, str] = {}

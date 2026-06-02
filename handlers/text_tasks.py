@@ -288,55 +288,59 @@ def _parse_code_change(response: str) -> dict:
     return change
 
 
+def _needs_code_context(text: str) -> bool:
+    """Определяет нужно ли читать код для этого сообщения."""
+    # Короткие/разговорные сообщения — не нужен код
+    if len(text) < 20:
+        return False
+    t = text.lower()
+    # Ключевые слова, которые явно указывают на работу с кодом/игрой
+    code_signals = [
+        "добавь", "измени", "сделай", "почини", "исправь", "реализуй", "напиши код",
+        "код", "функци", "html", "js ", "javascript", "css",
+        "баг", "ошибк", "не работает", "падает", "crash", "сломал",
+        "игрок", "персонаж", "движени", "анимаци", "систем",
+        "карт", "тайл", "canvas", "render", "update", "спрайт",
+        "скорост", "коллизи", "физик", "камер", "зон",
+        "как работает", "как устроен", "где в коде", "что делает",
+        "world.html", "hub.html", "battle.html", "creator.html",
+    ]
+    return any(kw in t for kw in code_signals)
+
+
 async def _process_task(user_id: int, task_id: int, text: str, status_msg: Message, model_info: dict):
     try:
         index = load_index()
         context_files = []
         code_context = ""
 
-        if index and not index.get("error"):
+        if _needs_code_context(text) and index and not index.get("error"):
             text_lower = text.lower()
 
+            # 1. Файл явно упомянут в тексте — используем его
             named_files = [
                 f["path"] for f in index.get("files", [])
                 if Path(f["path"]).name.lower() in text_lower
                 or Path(f["path"]).stem.lower() in text_lower
             ]
-            world_files = [
-                f["path"] for f in index.get("files", [])
-                if "world" in Path(f["path"]).stem.lower()
-            ]
 
             if named_files:
                 unique_files = named_files[:3]
             else:
+                # 2. Ищем по коду — берём только то что реально нашлось
                 search_results = await search_in_code(text)
-                found = list(dict.fromkeys(r["file"] for r in search_results[:4]))
-                if world_files and not any("world" in f.lower() for f in found):
-                    found = world_files[:1] + [f for f in found if "battle" not in f.lower()][:2]
-                unique_files = found[:3]
-
-            if not unique_files and world_files:
-                unique_files = world_files[:1]
+                unique_files = list(dict.fromkeys(r["file"] for r in search_results[:3]))
+                # Не добавляем world.html автоматически — только если поиск его вернул
 
             if unique_files:
                 context_files = unique_files
                 short_names = [Path(f).name for f in unique_files]
                 await status_msg.edit_text(
-                    f"⚙️ Принял\n📄 Читаю: {', '.join(short_names)}...",
+                    f"📄 {', '.join(short_names)}...",
                     reply_markup=_stop_keyboard(task_id)
                 )
                 code_context = await read_relevant_files(unique_files, max_chars=12000, query=text)
-            else:
-                await status_msg.edit_text(
-                    "⚙️ Принял\n📭 Файлы не найдены, работаю без контекста",
-                    reply_markup=_stop_keyboard(task_id)
-                )
-        else:
-            await status_msg.edit_text(
-                "⚙️ Принял\n📭 Код не проиндексирован — напиши 'обнови код'",
-                reply_markup=_stop_keyboard(task_id)
-            )
+        # Если код не нужен или не найден — идём к AI без контекста (это нормально)
 
         index_summary = ""
         if index and not index.get("error"):
@@ -372,12 +376,11 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
         await add_to_conversation(user_id, "user", text)
         history = await get_conversation(user_id, limit=8)
 
-        files_str = ', '.join(Path(f).name for f in context_files) if context_files else 'без контекста'
-        thinking_text = (
-            f"⚙️ Принял\n"
-            f"📄 {files_str}\n"
-            f"{model_info['emoji']} {model_info['name']} думает..."
-        )
+        if context_files:
+            files_str = ', '.join(Path(f).name for f in context_files)
+            thinking_text = f"📄 {files_str}\n{model_info['emoji']} думает..."
+        else:
+            thinking_text = f"{model_info['emoji']} думает..."
         await status_msg.edit_text(thinking_text, reply_markup=_stop_keyboard(task_id))
 
         heartbeat = asyncio.create_task(_heartbeat(status_msg, thinking_text, task_id))
@@ -501,7 +504,7 @@ async def handle_text_task(message: Message):
     model_info = get_model_info(model_key)
 
     status_msg = await message.answer(
-        "⚙️ Принял\n🔍 Ищу связанный код...",
+        f"{model_info['emoji']} Думаю...",
         reply_markup=_stop_keyboard(task_id)
     )
 

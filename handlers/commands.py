@@ -12,10 +12,10 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from loguru import logger
 
 from config import ALLOWED_USERS
-from memory import get_stats, get_last_changes, get_reminders, clear_conversation
+from memory import get_stats, get_last_changes, get_reminders, clear_conversation, get_changes_with_rollback, get_todos, save_todo, mark_todo_done
 from limit_manager import get_limit_status
 from git_manager import format_git_status, is_git_repo
-from game_expert import format_index_message, index_game, search_in_code
+from game_expert import format_index_message, index_game, search_in_code, _fetch_file, load_index
 from teacher import explain_error, suggest_best_practices
 from ai_client import AVAILABLE_MODELS, get_user_model, set_user_model
 
@@ -56,6 +56,9 @@ async def cmd_start(message: Message):
         f"/index — переиндексировать игру\n"
         f"/search — поиск по коду\n"
         f"/reminders — напоминания\n"
+        f"/changes — история изменений + откат\n"
+        f"/find функция — найти код\n"
+        f"/todo — список задач\n"
         f"/explain — объяснить ошибку\n"
         f"/review — ревью кода\n"
         f"/clear — очистить контекст разговора",
@@ -401,6 +404,130 @@ async def cmd_testmodels(message: Message):
 
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка: {e}")
+
+
+@router.message(Command("changes"))
+async def cmd_changes(message: Message):
+    """История изменений с кнопками отката."""
+    if not is_allowed(message.from_user.id):
+        return
+
+    changes = await get_changes_with_rollback(message.from_user.id, limit=8)
+    if not changes:
+        await message.answer("📋 Изменений пока нет.")
+        return
+
+    for ch in changes:
+        date = ch["changed_at"][:16].replace("T", " ")
+        status = "↩️ откатано" if ch["status"] == "rolled_back" else "✅ применено"
+        text = f"{status} | {date}\n📄 {ch['file_path']}\n{ch['description'][:60]}"
+
+        kb = None
+        if ch["status"] != "rolled_back" and ch.get("has_rollback"):
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="↩️ Откатить", callback_data=f"rollback:{ch['id']}")
+            ]])
+        await message.answer(text, reply_markup=kb)
+
+
+@router.message(Command("find"))
+async def cmd_find(message: Message):
+    """Ищет функцию/переменную в коде и показывает контекст."""
+    if not is_allowed(message.from_user.id):
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "🔍 Использование: /find имя_функции\n\nПример: /find fireBullet"
+        )
+        return
+
+    query = parts[1].strip()
+    msg = await message.answer(f"🔍 Ищу `{query}`...", parse_mode="Markdown")
+
+    index = load_index()
+    if not index:
+        await msg.edit_text("❌ Игра не проиндексирована. Запусти /index")
+        return
+
+    found_blocks = []
+    for file_info in index.get("files", [])[:20]:
+        content = await _fetch_file(file_info["path"])
+        if not content:
+            continue
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            if query.lower() in line.lower():
+                start = max(0, i - 3)
+                end = min(len(lines), i + 15)
+                snippet = "\n".join(lines[start:end])
+                found_blocks.append(f"📄 {file_info['path']}:{i+1}\n<pre>{snippet[:800]}</pre>")
+                if len(found_blocks) >= 3:
+                    break
+        if len(found_blocks) >= 3:
+            break
+
+    if not found_blocks:
+        await msg.edit_text(f"😶 `{query}` не найдено в коде.", parse_mode="Markdown")
+        return
+
+    await msg.edit_text(f"🔍 {query}:\n\n" + "\n\n".join(found_blocks))
+
+
+@router.message(Command("todo"))
+async def cmd_todo(message: Message):
+    """Список задач."""
+    if not is_allowed(message.from_user.id):
+        return
+
+    parts = message.text.split(maxsplit=1)
+
+    # /todo добавить текст задачи
+    if len(parts) > 1:
+        text = parts[1].strip()
+        await save_todo(message.from_user.id, text)
+        await message.answer(f"✅ Добавил в TODO: {text}")
+        return
+
+    # /todo — показать список
+    todos = await get_todos(message.from_user.id)
+
+    # Также ищем TODO в коде игры
+    index = load_index()
+    code_todos = []
+    if index and not index.get("error"):
+        for file_info in index.get("files", [])[:10]:
+            content = await _fetch_file(file_info["path"])
+            if not content:
+                continue
+            for i, line in enumerate(content.splitlines(), 1):
+                if "TODO" in line or "FIXME" in line or "HACK" in line:
+                    code_todos.append(f"  `{file_info['path']}:{i}` — {line.strip()[:60]}")
+                    if len(code_todos) >= 5:
+                        break
+            if len(code_todos) >= 5:
+                break
+
+    lines = ["📝 *TODO список:*\n"]
+
+    if todos:
+        for t in todos:
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Готово", callback_data=f"todo_done:{t['id']}")
+            ]])
+            await message.answer(f"• {t['text']}", reply_markup=kb)
+
+    if code_todos:
+        lines.append("\n🔍 *TODO в коде игры:*")
+        lines.extend(code_todos)
+
+    if not todos and not code_todos:
+        await message.answer("📝 TODO список пуст. Добавь: /todo текст задачи")
+        return
+
+    if lines:
+        await message.answer("\n".join(lines), parse_mode="Markdown")
 
 
 @router.message(Command("pull"))

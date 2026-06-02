@@ -75,6 +75,34 @@ async def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS rollbacks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                change_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                old_content TEXT NOT NULL,
+                saved_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_prefs (
+                user_id INTEGER NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                PRIMARY KEY (user_id, key)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS todos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                file_path TEXT,
+                line_num INTEGER,
+                text TEXT NOT NULL,
+                done INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
         await db.commit()
         logger.info("📦 База данных инициализирована")
 
@@ -100,15 +128,16 @@ async def update_task(task_id: int, status: str, result: str = None,
 
 
 async def save_code_change(task_id: int, file_path: str, branch: str,
-                           commit_hash: str, description: str, diff: str):
+                           commit_hash: str, description: str, diff: str) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+        cursor = await db.execute(
             """INSERT INTO code_changes
                (task_id, changed_at, file_path, branch, commit_hash, description, diff)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (task_id, datetime.now().isoformat(), file_path, branch, commit_hash, description, diff)
         )
         await db.commit()
+        return cursor.lastrowid
 
 
 async def add_tokens(user_id: int, tokens: int):
@@ -238,6 +267,95 @@ async def get_pending_reminders() -> list:
 async def mark_reminder_done(reminder_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE reminders SET done=1 WHERE id=?", (reminder_id,))
+        await db.commit()
+
+
+# ─── Откаты ───────────────────────────────────────────────
+
+async def save_rollback(change_id: int, file_path: str, old_content: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO rollbacks (change_id, file_path, old_content, saved_at) VALUES (?, ?, ?, ?)",
+            (change_id, file_path, old_content, datetime.now().isoformat())
+        )
+        await db.commit()
+
+
+async def get_rollback(change_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _fetchone(db,
+            "SELECT * FROM rollbacks WHERE change_id=?", (change_id,)
+        )
+        return dict(row) if row else None
+
+
+async def get_changes_with_rollback(user_id: int, limit: int = 8) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await _fetchall(db,
+            """SELECT cc.id, cc.file_path, cc.changed_at, cc.description, cc.status,
+                      (SELECT 1 FROM rollbacks r WHERE r.change_id=cc.id) as has_rollback
+               FROM code_changes cc
+               JOIN tasks t ON cc.task_id = t.id
+               WHERE t.user_id = ?
+               ORDER BY cc.changed_at DESC LIMIT ?""",
+            (user_id, limit)
+        )
+        return [dict(r) for r in rows]
+
+
+async def mark_change_rolled_back(change_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE code_changes SET status='rolled_back' WHERE id=?", (change_id,)
+        )
+        await db.commit()
+
+
+# ─── Предпочтения пользователя ───────────────────────────
+
+async def save_pref(user_id: int, key: str, value: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO user_prefs (user_id, key, value) VALUES (?, ?, ?)",
+            (user_id, key, value)
+        )
+        await db.commit()
+
+
+async def get_pref(user_id: int, key: str, default: str = "") -> str:
+    async with aiosqlite.connect(DB_PATH) as db:
+        row = await _fetchone(db,
+            "SELECT value FROM user_prefs WHERE user_id=? AND key=?", (user_id, key)
+        )
+        return row[0] if row else default
+
+
+# ─── TODO-список ─────────────────────────────────────────
+
+async def save_todo(user_id: int, text: str, file_path: str = "", line_num: int = 0):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO todos (user_id, file_path, line_num, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, file_path, line_num, text, datetime.now().isoformat())
+        )
+        await db.commit()
+
+
+async def get_todos(user_id: int) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await _fetchall(db,
+            "SELECT * FROM todos WHERE user_id=? AND done=0 ORDER BY created_at DESC",
+            (user_id,)
+        )
+        return [dict(r) for r in rows]
+
+
+async def mark_todo_done(todo_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE todos SET done=1 WHERE id=?", (todo_id,))
         await db.commit()
 
 

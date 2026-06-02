@@ -324,6 +324,19 @@ async def handle_text_task(message: Message):
         )
         return
 
+    # Предупреждение об устаревшем индексе (> 2 часов)
+    import time as _time
+    index_check = load_index()
+    if index_check and not index_check.get("error"):
+        from config import BASE_DIR
+        idx_path = BASE_DIR / "game_index.json"
+        if idx_path.exists():
+            age_hours = (_time.time() - idx_path.stat().st_mtime) / 3600
+            if age_hours > 2:
+                await message.answer(
+                    f"⚠️ Индекс устарел ({int(age_hours)}ч). Напиши /index чтобы обновить код."
+                )
+
     task_id = await save_task(user_id, "text", text)
     model_key = get_user_model(user_id)
     model_info = get_model_info(model_key)

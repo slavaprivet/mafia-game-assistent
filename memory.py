@@ -382,24 +382,79 @@ async def get_reminders(user_id: int) -> list:
 
 
 # ─── Знания об игре (обучение на успешных изменениях) ─────
+# Хранятся в GitHub репо (game_knowledge.json) — переживают редеплой Railway
+
+KNOWLEDGE_GITHUB_PATH = "game_knowledge.json"
+
+
+async def _push_knowledge_to_github(entries: list[dict]):
+    """Пушит game_knowledge.json в GitHub репо."""
+    try:
+        from game_expert import push_file_to_github
+        content = json.dumps(entries, ensure_ascii=False, indent=2)
+        await push_file_to_github(
+            KNOWLEDGE_GITHUB_PATH, content,
+            "bot: обновлены знания об игре"
+        )
+        logger.info(f"📚 Знания сохранены в GitHub ({len(entries)} записей)")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения знаний в GitHub: {e}")
+
+
+async def load_knowledge_from_github():
+    """Загружает game_knowledge.json из GitHub в SQLite при старте."""
+    try:
+        from game_expert import _fetch_file
+        content = await _fetch_file(KNOWLEDGE_GITHUB_PATH)
+        if not content:
+            logger.info("📚 game_knowledge.json не найден — начинаем с нуля")
+            return
+        entries = json.loads(content)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM game_knowledge")
+            for e in entries:
+                await db.execute("""
+                    INSERT INTO game_knowledge
+                    (topic, request, working_code, func_name, file_path, model, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (e.get("topic",""), e.get("request",""), e.get("working_code",""),
+                      e.get("func_name",""), e.get("file_path",""),
+                      e.get("model",""), e.get("created_at", datetime.now().isoformat())))
+            await db.commit()
+        logger.info(f"📚 Загружено {len(entries)} знаний из GitHub")
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить знания из GitHub: {e}")
+
 
 async def save_game_knowledge(topic: str, request: str, working_code: str,
                                func_name: str = "", file_path: str = "", model: str = ""):
-    """Сохраняет рабочий пример кода — бот учится на своих успехах."""
+    """Сохраняет рабочий пример — в SQLite и GitHub."""
+    entry = {
+        "topic": topic[:200],
+        "request": request[:200],
+        "working_code": working_code[:2000],
+        "func_name": func_name,
+        "file_path": file_path,
+        "model": model,
+        "created_at": datetime.now().isoformat(),
+    }
     async with aiosqlite.connect(DB_PATH) as db:
-        # Не дублируем — если такой топик уже есть, обновляем
         await db.execute("""
             INSERT INTO game_knowledge (topic, request, working_code, func_name, file_path, model, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (topic, request[:200], working_code[:2000], func_name, file_path, model, datetime.now().isoformat()))
+        """, (entry["topic"], entry["request"], entry["working_code"],
+              entry["func_name"], entry["file_path"], entry["model"], entry["created_at"]))
         await db.commit()
+
+    # Пушим обновлённый список в GitHub
+    all_entries = await get_all_knowledge(limit=200)
+    await _push_knowledge_to_github(all_entries)
 
 
 async def get_relevant_knowledge(query: str, limit: int = 3) -> list[dict]:
     """Ищет похожие рабочие примеры по ключевым словам."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        # Простой поиск по словам из запроса
         words = [w for w in query.lower().split() if len(w) > 3]
         if not words:
             return []
@@ -415,7 +470,7 @@ async def get_relevant_knowledge(query: str, limit: int = 3) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-async def get_all_knowledge(limit: int = 20) -> list[dict]:
+async def get_all_knowledge(limit: int = 200) -> list[dict]:
     """Возвращает все накопленные знания."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

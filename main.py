@@ -91,6 +91,13 @@ async def main():
     except Exception as e:
         logger.error(f"Ошибка автоиндексации: {e}")
 
+    # Загружаем накопленные знания из GitHub
+    try:
+        from memory import load_knowledge_from_github
+        await load_knowledge_from_github()
+    except Exception as e:
+        logger.error(f"Ошибка загрузки знаний: {e}")
+
     me = await bot.get_me()
     logger.info(f"✅ Бот @{me.username} запущен!")
 

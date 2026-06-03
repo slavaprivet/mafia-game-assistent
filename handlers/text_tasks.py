@@ -390,38 +390,67 @@ def _needs_code_context(text: str) -> bool:
 
 
 # Перевод русских игровых понятий → английские термины в коде
+# Ключи — любые части слова (включая опечатки и сокращения)
 _RU_TO_EN = {
+    # NPC / персонажи
     "нпс": ["npc", "NPC", "spawn"],
     "нпц": ["npc", "NPC"],
+    "перс": ["npc", "character", "player"],      # "перса", "перс"
     "персонаж": ["player", "character", "npc"],
     "спавн": ["spawn"],
+    "сппавн": ["spawn"],                          # опечатка
+    "spawn": ["spawn"],
+    # Банды / враги
     "бандит": ["gang", "bandit", "enemy"],
     "банда": ["gang", "Gang"],
+    "враг": ["enemy", "hostile"],
+    # Полиция
     "коп": ["cop", "police", "Police"],
     "копы": ["cop", "police"],
+    "полиц": ["police", "cop"],
+    # Игрок
     "игрок": ["player", "Player"],
+    # Движение
     "ходит": ["walk", "move", "patrol"],
+    "патрул": ["patrol", "walk"],
+    "идёт": ["walk", "move"],
+    # Анимация
     "анимац": ["anim", "animation", "idle"],
     "покачива": ["sway", "idle", "walk"],
+    # Районы / зоны
     "район": ["district", "zone", "capture"],
     "захват": ["capture", "zone"],
+    "зон": ["zone", "area"],
+    # Оружие / бой
     "оружи": ["weapon", "gun", "fire"],
     "стрельб": ["fire", "shoot", "bullet"],
+    "пуля": ["bullet", "projectile"],
+    "бой": ["fight", "battle", "combat"],
+    "атак": ["attack", "fight"],
+    # Здания / локации
     "здание": ["building", "house"],
+    "будж": ["bourgeois", "building", "house"],  # "буржуазия" / "Бурж Мафия"
+    "бурж": ["bourgeois", "building"],
     "тюрьм": ["jail", "prison"],
     "логово": ["lair", "base", "arena"],
-    "торговец": ["merchant", "shop", "market"],
-    "рынок": ["market", "shop"],
+    "рынок": ["market", "shop", "black"],
     "больниц": ["hospital", "heal"],
+    # Экономика
     "деньг": ["money", "cash", "gold"],
     "уровень": ["level", "exp", "xp"],
+    # Транспорт
     "машин": ["car", "vehicle"],
-    "пуля": ["bullet", "projectile"],
+    # Эффекты
     "взрыв": ["explode", "explosion"],
     "звук": ["sound", "audio"],
+    # UI / карта
     "камер": ["camera", "view"],
-    "мини.карт": ["minimap", "map"],
+    "мини": ["minimap", "map"],
+    "карт": ["map", "tile"],
     "инвентарь": ["inventory", "items"],
+    # Создатель
+    "крeat": ["creator", "character"],           # "Креате" → creator
+    "creator": ["creator", "character"],
 }
 
 

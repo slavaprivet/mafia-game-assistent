@@ -279,6 +279,7 @@ async def push_file_to_github(path: str, content: str, commit_message: str) -> t
 
         async with session.put(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status in (200, 201):
+                _file_cache.pop(path, None)  # сбрасываем кеш — следующий запрос получит свежий файл
                 return True, f"Файл {path} сохранён на GitHub"
             else:
                 text = await resp.text()

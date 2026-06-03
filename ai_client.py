@@ -97,7 +97,12 @@ async def _call_openrouter(model_id: str, messages: list, system_prompt: str = N
             if resp.status != 200:
                 error = data.get("error", {}).get("message", str(data))
                 raise Exception(f"OpenRouter {resp.status}: {error}")
-            answer = data["choices"][0]["message"]["content"]
+            choices = data.get("choices") or []
+            if not choices:
+                raise Exception(f"OpenRouter вернул пустой ответ от {model_id}")
+            answer = choices[0].get("message", {}).get("content", "")
+            if not answer:
+                raise Exception(f"Пустой content от {model_id}")
             tokens = data.get("usage", {}).get("total_tokens", 0)
             return answer, tokens
 

@@ -252,38 +252,96 @@ def find_related_files(target_file: str) -> list[str]:
 
 
 async def push_file_to_github(path: str, content: str, commit_message: str) -> tuple[bool, str]:
-    """Сохраняет файл в GitHub репозиторий. Возвращает (успех, сообщение)."""
+    """
+    Сохраняет файл в GitHub репозиторий через Git Data API.
+    Работает с файлами любого размера (обходит лимит 1MB Contents API).
+    """
     if not GITHUB_TOKEN:
         return False, "GITHUB_TOKEN не задан"
 
-    url = f"{API_BASE}/contents/{path}"
+    import base64
 
-    # Получаем текущий SHA файла (нужен для обновления)
-    sha = None
     async with aiohttp.ClientSession(headers=_headers()) as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                sha = data.get("sha")
+        try:
+            # 1. Получаем SHA последнего коммита ветки
+            async with session.get(
+                f"{API_BASE}/git/ref/heads/{GITHUB_BRANCH}",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    return False, f"Не удалось получить ветку: {resp.status}"
+                ref_data = await resp.json()
+                latest_commit_sha = ref_data["object"]["sha"]
 
-        # Загружаем файл
-        import base64
-        encoded = base64.b64encode(content.encode("utf-8")).decode()
-        payload = {
-            "message": commit_message,
-            "content": encoded,
-            "branch": GITHUB_BRANCH,
-        }
-        if sha:
-            payload["sha"] = sha
+            # 2. Получаем дерево последнего коммита
+            async with session.get(
+                f"{API_BASE}/git/commits/{latest_commit_sha}",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    return False, f"Не удалось получить коммит: {resp.status}"
+                commit_data = await resp.json()
+                base_tree_sha = commit_data["tree"]["sha"]
 
-        async with session.put(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status in (200, 201):
-                _file_cache.pop(path, None)  # сбрасываем кеш — следующий запрос получит свежий файл
-                return True, f"Файл {path} сохранён на GitHub"
-            else:
-                text = await resp.text()
-                return False, f"Ошибка GitHub API {resp.status}: {text[:200]}"
+            # 3. Создаём blob с содержимым файла
+            encoded = base64.b64encode(content.encode("utf-8")).decode()
+            async with session.post(
+                f"{API_BASE}/git/blobs",
+                json={"content": encoded, "encoding": "base64"},
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status not in (200, 201):
+                    text = await resp.text()
+                    return False, f"Ошибка создания blob: {resp.status}: {text[:200]}"
+                blob_data = await resp.json()
+                blob_sha = blob_data["sha"]
+
+            # 4. Создаём новое дерево с изменённым файлом
+            async with session.post(
+                f"{API_BASE}/git/trees",
+                json={
+                    "base_tree": base_tree_sha,
+                    "tree": [{"path": path, "mode": "100644", "type": "blob", "sha": blob_sha}]
+                },
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status not in (200, 201):
+                    text = await resp.text()
+                    return False, f"Ошибка создания дерева: {resp.status}: {text[:200]}"
+                tree_data = await resp.json()
+                new_tree_sha = tree_data["sha"]
+
+            # 5. Создаём коммит
+            async with session.post(
+                f"{API_BASE}/git/commits",
+                json={
+                    "message": commit_message,
+                    "tree": new_tree_sha,
+                    "parents": [latest_commit_sha]
+                },
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
+                if resp.status not in (200, 201):
+                    text = await resp.text()
+                    return False, f"Ошибка создания коммита: {resp.status}: {text[:200]}"
+                new_commit_data = await resp.json()
+                new_commit_sha = new_commit_data["sha"]
+
+            # 6. Обновляем ссылку ветки
+            async with session.patch(
+                f"{API_BASE}/git/refs/heads/{GITHUB_BRANCH}",
+                json={"sha": new_commit_sha},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status not in (200, 201):
+                    text = await resp.text()
+                    return False, f"Ошибка обновления ветки: {resp.status}: {text[:200]}"
+
+            _file_cache.pop(path, None)  # сбрасываем кеш
+            return True, f"Файл {path} сохранён на GitHub"
+
+        except Exception as e:
+            return False, f"Ошибка пуша: {e}"
 
 
 async def delete_file_from_github(path: str, commit_message: str) -> tuple[bool, str]:

@@ -84,7 +84,7 @@ async def _call_openrouter(model_id: str, messages: list, system_prompt: str = N
             OPENROUTER_URL,
             json={"model": model_id, "messages": msgs, "max_tokens": 4096},
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=60)
+            timeout=aiohttp.ClientTimeout(total=25)
         ) as resp:
             data = await resp.json()
             if resp.status == 429:

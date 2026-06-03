@@ -59,6 +59,25 @@ async def hourly_report(bot: Bot, user_ids: list):
         await asyncio.sleep(3600)
 
 
+async def auto_reindex():
+    """Переиндексирует игру и обновляет знания каждые 2 часа."""
+    while True:
+        await asyncio.sleep(7200)
+        try:
+            from game_expert import index_game
+            index = await index_game()
+            if not index.get("error"):
+                logger.info(f"🔄 Авто-переиндексация: {index['file_count']} файлов, {index['total_lines']} строк")
+        except Exception as e:
+            logger.error(f"Ошибка авто-переиндексации: {e}")
+        try:
+            from memory import load_knowledge_from_github
+            await load_knowledge_from_github()
+            logger.info("🔄 Знания обновлены из GitHub")
+        except Exception as e:
+            logger.error(f"Ошибка обновления знаний: {e}")
+
+
 async def main():
     validate_config()
     await init_db()
@@ -76,6 +95,7 @@ async def main():
     dp.include_router(callbacks.router)
 
     asyncio.create_task(check_reminders(bot))
+    asyncio.create_task(auto_reindex())
     if HOURLY_REPORTS and ALLOWED_USERS:
         asyncio.create_task(hourly_report(bot, ALLOWED_USERS))
 

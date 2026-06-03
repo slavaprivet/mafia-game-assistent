@@ -601,14 +601,5 @@ async def handle_text_task(message: Message):
         reply_markup=_stop_keyboard(task_id)
     )
 
-    async def _run_with_timeout():
-        try:
-            await asyncio.wait_for(_process_task(user_id, task_id, text, status_msg, model_info), timeout=90)
-        except asyncio.TimeoutError:
-            try:
-                await status_msg.edit_text("⏱ Не успел за 90 сек. Попробуй ещё раз или смени модель (/model).")
-            except Exception:
-                pass
-
-    task = asyncio.create_task(_run_with_timeout())
+    task = asyncio.create_task(_process_task(user_id, task_id, text, status_msg, model_info))
     active_tasks[user_id] = task

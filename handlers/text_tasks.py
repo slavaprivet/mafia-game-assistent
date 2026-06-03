@@ -30,6 +30,7 @@ router = Router()
 
 pending_changes: dict[int, dict] = {}
 active_tasks: dict[int, asyncio.Task] = {}
+_last_message: dict[int, tuple[str, float]] = {}  # user_id -> (text, timestamp)
 
 
 def is_allowed(user_id: int) -> bool:
@@ -545,13 +546,20 @@ async def handle_text_task(message: Message):
     user_id = message.from_user.id
     text = message.text.strip()
 
+    if text.startswith("/"):
+        return
+
+    # Защита от дублей — одно и то же сообщение в течение 15 сек игнорируем
+    now = time.time()
+    last_text, last_ts = _last_message.get(user_id, ("", 0))
+    if text == last_text and now - last_ts < 15:
+        return
+    _last_message[user_id] = (text, now)
+
     # Отменяем предыдущую задачу
     prev = active_tasks.get(user_id)
     if prev and not prev.done():
         prev.cancel()
-
-    if text.startswith("/"):
-        return
 
     # Напоминание
     is_reminder, task_text, remind_time = _is_reminder_request(text)

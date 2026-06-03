@@ -190,9 +190,21 @@ async def callback_addtogame(callback: CallbackQuery):
     preview_data = pending_previews.get(task_id)
 
     if not preview_data:
-        await callback.answer("⚠️ Бот перезапускался — повтори задачу текстом", show_alert=True)
-        await callback.message.edit_reply_markup()
-        return
+        # Бот перезапускался — но превью-файл может ещё быть на GitHub
+        # Пробуем восстановить: берём world_preview.html и пушим в world.html
+        await callback.answer("⚙️ Бот перезапускался, пробую восстановить превью...", show_alert=False)
+        preview_content = await _fetch_file("world_preview.html")
+        if not preview_content:
+            await callback.answer("⚠️ Превью не найдено — повтори задачу текстом", show_alert=True)
+            await callback.message.edit_reply_markup()
+            return
+        # Восстанавливаем из GitHub
+        preview_data = {
+            "preview_path": "world_preview.html",
+            "target_path": "world.html",
+            "new_content": preview_content,
+            "change": {"description": f"task-{task_id} (восстановлено после рестарта)"},
+        }
 
     await callback.answer("⏳ Добавляю в игру...")
 
@@ -327,6 +339,9 @@ async def callback_cancelpreview(callback: CallbackQuery):
     if preview_data:
         await delete_file_from_github(preview_data["preview_path"], f"cleanup: cancelled preview task-{task_id}")
         del pending_previews[task_id]
+    else:
+        # После рестарта — всё равно удаляем файл превью с GitHub если он есть
+        await delete_file_from_github("world_preview.html", f"cleanup: cancelled preview task-{task_id}")
 
     await callback.message.edit_text("↩️ Превью удалено. Опиши задачу иначе если нужно другое решение.")
 

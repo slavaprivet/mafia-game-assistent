@@ -1,56 +1,77 @@
 """
-Клиент для работы с AI через OpenRouter.
-Поддерживает несколько моделей с автоматическим fallback при лимите.
+AI клиент с двумя провайдерами:
+  1. OpenRouter — множество моделей, бесплатные + платные
+  2. Groq — быстрый резервный провайдер (Llama), если OpenRouter недоступен
 """
 
 import aiohttp
 import base64
 from pathlib import Path
 from loguru import logger
-from config import OPENROUTER_API_KEY, MAX_CONTEXT_SIZE
+from config import OPENROUTER_API_KEY, GROQ_API_KEY, MAX_CONTEXT_SIZE
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 AVAILABLE_MODELS = {
     "chatgpt": {
         "id": "openai/gpt-4o-mini",
         "name": "ChatGPT 4o mini",
         "emoji": "🤖",
+        "provider": "openrouter",
     },
     "gpt": {
         "id": "openai/gpt-oss-120b:free",
         "name": "GPT OSS 120B",
         "emoji": "🟢",
+        "provider": "openrouter",
     },
     "qwen": {
         "id": "qwen/qwen3-235b-a22b:free",
         "name": "Qwen3 235B",
         "emoji": "🟣",
+        "provider": "openrouter",
     },
     "deepseek": {
         "id": "deepseek/deepseek-chat:free",
         "name": "DeepSeek V3",
         "emoji": "🔵",
+        "provider": "openrouter",
     },
     "gemma": {
         "id": "google/gemma-4-31b-it:free",
         "name": "Gemma 4 31B",
         "emoji": "♊",
+        "provider": "openrouter",
     },
     "nvidia": {
         "id": "nvidia/nemotron-3-super-120b-a12b:free",
         "name": "Nemotron 120B",
         "emoji": "🔵",
+        "provider": "openrouter",
+    },
+    "llama": {
+        "id": "llama-3.3-70b-versatile",
+        "name": "Llama 3.3 70B (Groq)",
+        "emoji": "🦙",
+        "provider": "groq",
+    },
+    "llama-fast": {
+        "id": "llama-3.1-8b-instant",
+        "name": "Llama 3.1 8B fast (Groq)",
+        "emoji": "⚡",
+        "provider": "groq",
     },
     "claude": {
         "id": "anthropic/claude-3.5-haiku",
         "name": "Claude 3.5 Haiku",
         "emoji": "🔶",
+        "provider": "openrouter",
     },
 }
 
-FALLBACK_ORDER = ["gpt", "qwen", "deepseek", "gemma", "nvidia"]
-
+# Порядок fallback — OpenRouter сначала, Groq как резерв
+FALLBACK_ORDER = ["gpt", "qwen", "deepseek", "gemma", "nvidia", "llama", "llama-fast"]
 
 _user_models: dict[int, str] = {}
 
@@ -99,10 +120,47 @@ async def _call_openrouter(model_id: str, messages: list, system_prompt: str = N
                 raise Exception(f"OpenRouter {resp.status}: {error}")
             choices = data.get("choices") or []
             if not choices:
-                raise Exception(f"OpenRouter вернул пустой ответ от {model_id}")
+                raise Exception(f"Пустой ответ от {model_id}")
             answer = choices[0].get("message", {}).get("content", "")
             if not answer:
                 raise Exception(f"Пустой content от {model_id}")
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+            return answer, tokens
+
+
+async def _call_groq(model_id: str, messages: list, system_prompt: str = None) -> tuple[str, int]:
+    if not GROQ_API_KEY:
+        raise Exception("GROQ_API_KEY не задан")
+
+    msgs = []
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
+    msgs.extend(messages)
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            GROQ_URL,
+            json={"model": model_id, "messages": msgs, "max_tokens": 4096},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as resp:
+            data = await resp.json()
+            if resp.status == 429:
+                raise RateLimitError(f"Groq rate limit на {model_id}")
+            if resp.status != 200:
+                error = data.get("error", {}).get("message", str(data))
+                raise Exception(f"Groq {resp.status}: {error}")
+            choices = data.get("choices") or []
+            if not choices:
+                raise Exception(f"Пустой ответ от Groq {model_id}")
+            answer = choices[0].get("message", {}).get("content", "")
+            if not answer:
+                raise Exception(f"Пустой content от Groq {model_id}")
             tokens = data.get("usage", {}).get("total_tokens", 0)
             return answer, tokens
 
@@ -126,9 +184,13 @@ async def ask_code_model(
         model = AVAILABLE_MODELS[model_key]
         try:
             logger.debug(f"Пробую {model['name']} для user {user_id}")
-            answer, tokens = await _call_openrouter(model["id"], messages, system_prompt)
+            if model["provider"] == "groq":
+                answer, tokens = await _call_groq(model["id"], messages, system_prompt)
+            else:
+                answer, tokens = await _call_openrouter(model["id"], messages, system_prompt)
+
             if model_key != preferred:
-                answer = f"[{model['emoji']} Переключился на {model['name']} — лимит основной]\n\n{answer}"
+                answer = f"[{model['emoji']} {model['name']}]\n\n{answer}"
             return answer, tokens
         except RateLimitError as e:
             logger.warning(f"Лимит на {model['name']}, следующая...")

@@ -1,5 +1,5 @@
 """
-Обработчики команд: /start, /help, /stats, /limits, /git, /index, /search, /reminders, /clear
+Обработчики команд — всё через кнопки, минимум текстовых команд.
 """
 
 import html
@@ -12,27 +12,57 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from loguru import logger
 
-from config import ALLOWED_USERS
-from memory import get_stats, get_last_changes, get_reminders, clear_conversation, get_changes_with_rollback, get_todos, save_todo, mark_todo_done
+from config import ALLOWED_USERS, GITHUB_REPO, GITHUB_BRANCH
+from memory import (get_stats, get_last_changes, get_reminders, clear_conversation,
+                    get_changes_with_rollback, get_todos, save_todo, mark_todo_done,
+                    get_all_knowledge)
 from limit_manager import get_limit_status
-from git_manager import format_git_status, is_git_repo
 from game_expert import format_index_message, index_game, search_in_code, _fetch_file, load_index
 from teacher import explain_error, suggest_best_practices
 from ai_client import AVAILABLE_MODELS, get_user_model, set_user_model
 
 router = Router()
 
+GITHUB_PAGES_BASE = f"https://{GITHUB_REPO.split('/')[0]}.github.io/{GITHUB_REPO.split('/')[1]}"
+
 
 def is_allowed(user_id: int) -> bool:
-    """Проверяет есть ли пользователь в списке разрешённых."""
     if not ALLOWED_USERS:
-        return True  # Если список пуст — разрешаем всем
+        return True
     return user_id in ALLOWED_USERS
 
 
+def _main_menu() -> InlineKeyboardMarkup:
+    """Главное меню — все действия кнопками."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Обновить код", callback_data="menu:index"),
+            InlineKeyboardButton(text="🎮 Открыть игру", callback_data="menu:open_game"),
+        ],
+        [
+            InlineKeyboardButton(text="📋 История изменений", callback_data="menu:changes"),
+            InlineKeyboardButton(text="↩️ Откатить", callback_data="menu:rollback"),
+        ],
+        [
+            InlineKeyboardButton(text="🔍 Поиск в коде", callback_data="menu:search"),
+            InlineKeyboardButton(text="📝 Список задач", callback_data="menu:todo"),
+        ],
+        [
+            InlineKeyboardButton(text="🧠 Память бота", callback_data="menu:knowledge"),
+            InlineKeyboardButton(text="🤖 Нейросеть", callback_data="menu:model"),
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="menu:stats"),
+            InlineKeyboardButton(text="🧹 Очистить контекст", callback_data="menu:clear"),
+        ],
+    ])
+
+
+# ── /start и /menu ────────────────────────────────────────────────────────────
+
 @router.message(Command("start"))
+@router.message(Command("menu"))
 async def cmd_start(message: Message):
-    """Приветственное сообщение."""
     if not is_allowed(message.from_user.id):
         await message.answer("🚫 Доступ запрещён.")
         return
@@ -40,313 +70,225 @@ async def cmd_start(message: Message):
     from game_expert import get_project_summary
     project_info = get_project_summary()
 
+    current_model = get_user_model(message.from_user.id)
+    model_info = AVAILABLE_MODELS.get(current_model, {})
+
     await message.answer(
-        f"👋 Привет! Я твой AI-разработчик игры.\n\n"
+        f"👋 Привет! Я твой AI-разработчик игры «Мафиози».\n\n"
         f"{project_info}\n\n"
-        f"📤 *Что я умею:*\n"
-        f"• Текст — пиши задачу, я разберусь\n"
-        f"• 📸 Скриншот — покажи ошибку, я найду причину\n"
-        f"• 🎤 Голосовое — говори задачу голосом\n"
-        f"• 📹 Видео — покажи баг в движении\n"
-        f"• 📄 Файл/лог — скину после разбора\n\n"
-        f"📋 *Команды:*\n"
-        f"/help — справка\n"
-        f"/stats — статистика\n"
-        f"/limits — токены\n"
-        f"/git — статус репозитория\n"
-        f"/index — переиндексировать игру\n"
-        f"/search — поиск по коду\n"
-        f"/reminders — напоминания\n"
-        f"/changes — история изменений + откат\n"
-        f"/find функция — найти код\n"
-        f"/todo — список задач\n"
-        f"/explain — объяснить ошибку\n"
-        f"/review — ревью кода\n"
-        f"/clear — очистить контекст разговора",
-        parse_mode="Markdown"
+        f"🤖 Нейросеть: {model_info.get('emoji','')} {model_info.get('name','')}\n\n"
+        f"Просто пиши задачу — или выбери действие:",
+        reply_markup=_main_menu()
     )
 
 
-@router.message(Command("help"))
-async def cmd_help(message: Message):
-    """Справка по использованию."""
-    if not is_allowed(message.from_user.id):
+# ── Обработчик всех кнопок меню ───────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data.startswith("menu:"))
+async def callback_menu(callback: CallbackQuery):
+    if not is_allowed(callback.from_user.id):
+        await callback.answer("🚫 Доступ запрещён")
         return
 
-    await message.answer(
-        "📖 *Как пользоваться ботом:*\n\n"
-        "*Текстовые задачи:*\n"
-        "Просто напиши что нужно. Например:\n"
-        "• `game crash when open inventory`\n"
-        "• `добавь систему сохранений`\n"
-        "• `почему падает FPS в пещере?`\n\n"
-        "*Скриншоты:*\n"
-        "Прикрепи скриншот ошибки — бот прочитает текст\n"
-        "и спросит AI что не так\n\n"
-        "*Голос:*\n"
-        "Отправь голосовое — Whisper распознает и обработает\n\n"
-        "*Видео:*\n"
-        "Запись бага — бот разберёт по кадрам\n\n"
-        "*Работа с кодом:*\n"
-        "Когда бот предлагает изменение — появятся кнопки:\n"
-        "✅ Применить | 📝 Показать файл | ❌ Отклонить\n\n"
-        "*Поиск по коду:*\n"
-        "`/search текстура_огня` — найдёт все вхождения\n\n"
-        "*Напоминания:*\n"
-        "`напомни завтра починить сундуки` — запомню и напомню\n\n"
-        "*Ревью и объяснения:*\n"
-        "`/explain NullReferenceException` — объясню ошибку просто\n"
-        "`/review def my_func(): ...` — скажу что улучшить",
-        parse_mode="Markdown"
-    )
+    action = callback.data.split(":")[1]
+    await callback.answer()
 
+    # ── Обновить код ──────────────────────────────────────────────────────────
+    if action == "index":
+        msg = await callback.message.answer("🔄 Обновляю код с GitHub...")
+        index = await index_game()
+        if index.get("error"):
+            await msg.edit_text(f"❌ Ошибка: {index['error']}")
+        else:
+            await msg.edit_text(
+                f"✅ Код обновлён!\n\n"
+                f"📁 Файлов: {index['file_count']}\n"
+                f"📝 Строк: {index['total_lines']:,}\n"
+                f"🔧 Функций: {len(index['functions'])}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+                ]])
+            )
 
-@router.message(Command("stats"))
-async def cmd_stats(message: Message):
-    """Статистика работы бота."""
-    if not is_allowed(message.from_user.id):
-        return
+    # ── Открыть игру ──────────────────────────────────────────────────────────
+    elif action == "open_game":
+        game_url = f"{GITHUB_PAGES_BASE}/world.html"
+        await callback.message.answer(
+            f"🎮 Открыть игру:\n{game_url}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🎮 Открыть", url=game_url),
+                InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back"),
+            ]])
+        )
 
-    stats = await get_stats(message.from_user.id)
-    changes = await get_last_changes(message.from_user.id, limit=3)
-
-    lines = [
-        "📊 *Статистика*\n",
-        f"Всего задач: {stats['total_tasks']}",
-        f"Изменений кода: {stats['code_changes']}",
-        f"Токенов всего: {stats['total_tokens']:,}",
-        f"Сегодня токенов: {stats['today_tokens']:,}",
-        f"Запросов сегодня: {stats['today_requests']}",
-    ]
-
-    if changes:
-        lines.append("\n📝 *Последние изменения:*")
+    # ── История изменений ─────────────────────────────────────────────────────
+    elif action == "changes":
+        changes = await get_changes_with_rollback(callback.from_user.id, limit=8)
+        if not changes:
+            await callback.message.answer(
+                "📋 Изменений пока нет.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+                ]])
+            )
+            return
+        await callback.message.answer("📋 История изменений:")
         for ch in changes:
-            status_icon = "✅" if ch["status"] == "applied" else "↩️"
-            lines.append(f"{status_icon} `{ch['file_path']}` — {ch['description'][:40]}")
+            date = ch["changed_at"][:16].replace("T", " ")
+            status = "↩️ откатано" if ch["status"] == "rolled_back" else "✅ применено"
+            text = f"{status} | {date}\n📄 {ch['file_path']}\n{ch['description'][:60]}"
+            kb = None
+            if ch["status"] != "rolled_back" and ch.get("has_rollback"):
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="↩️ Откатить", callback_data=f"rollback:{ch['id']}")
+                ]])
+            await callback.message.answer(text, reply_markup=kb)
 
-    await message.answer("\n".join(lines), parse_mode="Markdown")
+    # ── Откатить последнее ────────────────────────────────────────────────────
+    elif action == "rollback":
+        changes = await get_changes_with_rollback(callback.from_user.id, limit=5)
+        active = [c for c in changes if c["status"] != "rolled_back" and c.get("has_rollback")]
+        if not active:
+            await callback.message.answer(
+                "❌ Нет изменений для отката.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+                ]])
+            )
+            return
+        await callback.message.answer("↩️ Выбери что откатить:")
+        for ch in active[:5]:
+            date = ch["changed_at"][:16].replace("T", " ")
+            await callback.message.answer(
+                f"📄 {ch['file_path']}\n{date} — {ch['description'][:50]}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="↩️ Откатить это", callback_data=f"rollback:{ch['id']}")
+                ]])
+            )
 
-
-@router.message(Command("limits"))
-async def cmd_limits(message: Message):
-    """Показывает использование токенов."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    status = await get_limit_status(message.from_user.id)
-    await message.answer(status, parse_mode="Markdown")
-
-
-@router.message(Command("git"))
-async def cmd_git(message: Message):
-    """Показывает статус Git репозитория."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    if not is_git_repo():
-        await message.answer(
-            "📭 Папка `game_repo/` не является Git репозиторием.\n\n"
-            "Чтобы инициализировать:\n"
-            "`cd game_repo && git init`",
-            parse_mode="Markdown"
-        )
-        return
-
-    status = format_git_status()
-    await message.answer(status, parse_mode="Markdown")
-
-
-@router.message(Command("index"))
-async def cmd_index(message: Message):
-    """Переиндексирует код игры."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    msg = await message.answer("📚 Индексирую игру... подожди немного")
-
-    index = await index_game()
-
-    if index.get("error"):
-        await msg.edit_text(
-            f"❌ {index['error']}\n\n"
-            f"Положи код игры в папку `game_repo/` рядом с ботом.",
-            parse_mode="Markdown"
-        )
-    else:
-        await msg.edit_text(
-            f"✅ *Игра проиндексирована!*\n\n"
-            f"📁 Файлов: {index['file_count']}\n"
-            f"📝 Строк: {index['total_lines']:,}\n"
-            f"🔧 Функций: {len(index['functions'])}\n"
-            f"🏗 Классов: {len(index['classes'])}\n\n"
-            f"Теперь я знаю структуру твоей игры.",
-            parse_mode="Markdown"
-        )
-
-
-@router.message(Command("search"))
-async def cmd_search(message: Message):
-    """Поиск по коду игры."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    # Получаем поисковый запрос
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer(
-            "🔍 *Поиск по коду*\n\n"
-            "Использование: `/search текст_для_поиска`\n\n"
+    # ── Поиск в коде ─────────────────────────────────────────────────────────
+    elif action == "search":
+        await callback.message.answer(
+            "🔍 Напиши что найти в коде:\n\n"
             "Примеры:\n"
-            "`/search inventory`\n"
-            "`/search def save_game`\n"
-            "`/search NullReferenceException`",
-            parse_mode="Markdown"
+            "• <code>найди код fireBullet</code>\n"
+            "• <code>найди функцию spawnNpc</code>\n"
+            "• <code>где функция initNpcs</code>"
         )
-        return
 
-    query = parts[1]
-    msg = await message.answer(f"🔍 Ищу `{query}`...", parse_mode="Markdown")
+    # ── Список задач ──────────────────────────────────────────────────────────
+    elif action == "todo":
+        todos = await get_todos(callback.from_user.id)
+        if not todos:
+            await callback.message.answer(
+                "📝 Список задач пуст.\n\nНапиши: <code>добавь задачу починить стрельбу</code>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+                ]])
+            )
+            return
+        await callback.message.answer("📝 Твои задачи:")
+        for t in todos:
+            await callback.message.answer(
+                f"• {t['text']}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Готово", callback_data=f"todo_done:{t['id']}")
+                ]])
+            )
 
-    results = await search_in_code(query)
-
-    if not results:
-        await msg.edit_text(f"😶 Ничего не найдено по запросу `{query}`", parse_mode="Markdown")
-        return
-
-    lines = [f"🔍 *Результаты поиска '{query}':*\n"]
-    for r in results[:10]:
-        lines.append(f"`{r['file']}:{r['line_num']}`")
-        lines.append(f"  `{r['line_text'][:60]}`")
-
-    if len(results) > 10:
-        lines.append(f"\n...и ещё {len(results) - 10} совпадений")
-
-    await msg.edit_text("\n".join(lines), parse_mode="Markdown")
-
-
-@router.message(Command("reminders"))
-async def cmd_reminders(message: Message):
-    """Показывает список активных напоминаний."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    reminders = await get_reminders(message.from_user.id)
-
-    if not reminders:
-        await message.answer("📅 Нет активных напоминаний.")
-        return
-
-    lines = ["📅 *Напоминания:*\n"]
-    for r in reminders:
-        remind_date = r["remind_at"][:16].replace("T", " ")
-        lines.append(f"🔔 {remind_date} — {r['message']}")
-
-    await message.answer("\n".join(lines), parse_mode="Markdown")
-
-
-@router.message(Command("explain"))
-async def cmd_explain(message: Message):
-    """Объясняет ошибку простым языком."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer(
-            "🎓 *Объяснение ошибки*\n\n"
-            "Использование: `/explain текст ошибки`\n\n"
-            "Пример:\n"
-            "`/explain NullReferenceException: Object reference not set`",
-            parse_mode="Markdown"
+    # ── Память бота (знания об игре) ──────────────────────────────────────────
+    elif action == "knowledge":
+        knowledge = await get_all_knowledge(limit=20)
+        if not knowledge:
+            await callback.message.answer(
+                "🧠 Память пока пуста.\n\n"
+                "Каждый раз когда нажимаешь «✅ Добавить в игру» — бот запоминает рабочий код.\n"
+                "Со временем будет знать твою игру изнутри.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+                ]])
+            )
+            return
+        lines = [f"🧠 Бот знает {len(knowledge)} приёмов:\n"]
+        for k in knowledge:
+            date = k["created_at"][:10]
+            func = f" → {k['func_name']}" if k.get("func_name") else ""
+            lines.append(f"• {date} {k['topic'][:50]}{func}")
+        await callback.message.answer(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+            ]])
         )
-        return
 
-    error_text = parts[1]
-    msg = await message.answer("🎓 Разбираю ошибку...", parse_mode="Markdown")
-
-    explanation, tokens = await explain_error(error_text)
-
-    await msg.edit_text(
-        explanation[:4096],
-        parse_mode="Markdown"
-    )
-
-
-@router.message(Command("review"))
-async def cmd_review(message: Message):
-    """Анализирует код и предлагает улучшения."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer(
-            "🔬 *Ревью кода*\n\n"
-            "Использование: `/review код`\n\n"
-            "Или отправь файл с подписью `/review` — я проанализирую его.",
-            parse_mode="Markdown"
+    # ── Выбор нейросети ───────────────────────────────────────────────────────
+    elif action == "model":
+        current = get_user_model(callback.from_user.id)
+        buttons = []
+        for key, info in AVAILABLE_MODELS.items():
+            mark = " ✅" if key == current else ""
+            buttons.append([InlineKeyboardButton(
+                text=f"{info['emoji']} {info['name']}{mark}",
+                callback_data=f"setmodel:{key}"
+            )])
+        buttons.append([InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")])
+        await callback.message.answer(
+            "🤖 Выбери нейросеть:\n(при лимите — автопереключение на следующую)",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
         )
-        return
 
-    code = parts[1]
-    # Определяем язык по первой строке если есть markdown-блок
-    language = "python"
-    if code.startswith("```"):
-        first_line = code.split("\n")[0].strip("`").strip()
-        if first_line:
-            language = first_line
+    # ── Статистика ────────────────────────────────────────────────────────────
+    elif action == "stats":
+        stats = await get_stats(callback.from_user.id)
+        knowledge = await get_all_knowledge(limit=1)
+        current = get_user_model(callback.from_user.id)
+        model_info = AVAILABLE_MODELS.get(current, {})
+        await callback.message.answer(
+            f"📊 Статистика\n\n"
+            f"Задач всего: {stats['total_tasks']}\n"
+            f"Изменений кода: {stats['code_changes']}\n"
+            f"Токенов сегодня: {stats['today_tokens']:,}\n"
+            f"Запросов сегодня: {stats['today_requests']}\n"
+            f"Знаний накоплено: {stats.get('knowledge_count', len(knowledge))}\n\n"
+            f"🤖 Нейросеть: {model_info.get('emoji','')} {model_info.get('name','')}",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+            ]])
+        )
 
-    msg = await message.answer("🔬 Анализирую код...", parse_mode="Markdown")
+    # ── Очистить контекст ─────────────────────────────────────────────────────
+    elif action == "clear":
+        await clear_conversation(callback.from_user.id)
+        await callback.message.answer(
+            "🧹 Контекст разговора очищен.\nТеперь бот не помнит предыдущие сообщения.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+            ]])
+        )
 
-    feedback, tokens = await suggest_best_practices(code, language)
-
-    await msg.edit_text(
-        feedback[:4096],
-        parse_mode="Markdown"
-    )
-
-
-@router.message(Command("clear"))
-async def cmd_clear(message: Message):
-    """Очищает историю разговора (контекст для AI)."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    await clear_conversation(message.from_user.id)
-    await message.answer(
-        "🧹 Контекст разговора очищен.\n"
-        "Теперь я не помню предыдущие сообщения этой сессии."
-    )
+    # ── Назад в меню ─────────────────────────────────────────────────────────
+    elif action == "back":
+        current_model = get_user_model(callback.from_user.id)
+        model_info = AVAILABLE_MODELS.get(current_model, {})
+        from game_expert import get_project_summary
+        project_info = get_project_summary()
+        await callback.message.answer(
+            f"👋 Главное меню\n\n"
+            f"{project_info}\n\n"
+            f"🤖 Нейросеть: {model_info.get('emoji','')} {model_info.get('name','')}\n\n"
+            f"Просто пиши задачу — или выбери действие:",
+            reply_markup=_main_menu()
+        )
 
 
-@router.message(Command("model"))
-async def cmd_model(message: Message):
-    """Выбор AI модели."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    current = get_user_model(message.from_user.id)
-    buttons = []
-    for key, info in AVAILABLE_MODELS.items():
-        mark = " ✅" if key == current else ""
-        buttons.append([InlineKeyboardButton(
-            text=f"{info['emoji']} {info['name']}{mark}",
-            callback_data=f"setmodel:{key}"
-        )])
-
-    await message.answer(
-        "🤖 Выбери AI модель:\n(все бесплатные, при лимите автопереключение)",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
-
+# ── Смена модели ──────────────────────────────────────────────────────────────
 
 @router.callback_query(lambda c: c.data.startswith("setmodel:"))
 async def callback_set_model(callback: CallbackQuery):
     model_key = callback.data.split(":")[1]
     set_user_model(callback.from_user.id, model_key)
     info = AVAILABLE_MODELS.get(model_key, {})
-    await callback.answer(f"Переключился на {info.get('name', model_key)}")
+    await callback.answer(f"✅ {info.get('name', model_key)}")
 
     current = get_user_model(callback.from_user.id)
     buttons = []
@@ -356,7 +298,7 @@ async def callback_set_model(callback: CallbackQuery):
             text=f"{m['emoji']} {m['name']}{mark}",
             callback_data=f"setmodel:{key}"
         )])
-
+    buttons.append([InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")])
     try:
         await callback.message.edit_reply_markup(
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -365,96 +307,124 @@ async def callback_set_model(callback: CallbackQuery):
         pass
 
 
-@router.message(Command("testmodels"))
-async def cmd_testmodels(message: Message):
-    """Проверяет какие модели OpenRouter реально доступны."""
+# ── TODO готово ───────────────────────────────────────────────────────────────
+
+@router.callback_query(lambda c: c.data.startswith("todo_done:"))
+async def callback_todo_done(callback: CallbackQuery):
+    todo_id = int(callback.data.split(":")[1])
+    await mark_todo_done(todo_id)
+    await callback.answer("✅ Готово!")
+    await callback.message.edit_reply_markup()
+
+
+# ── Старые команды (оставляем для совместимости) ──────────────────────────────
+
+@router.message(Command("help"))
+async def cmd_help(message: Message):
     if not is_allowed(message.from_user.id):
         return
+    await message.answer(
+        "📖 Просто пиши задачу текстом — бот поймёт.\n\n"
+        "Или нажми /menu чтобы открыть меню с кнопками.",
+        reply_markup=_main_menu()
+    )
 
-    import aiohttp
-    from config import OPENROUTER_API_KEY
 
-    msg = await message.answer("🔍 Проверяю доступные бесплатные модели на OpenRouter...")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                data = await resp.json()
-
-        if resp.status != 200:
-            await msg.edit_text(f"❌ Ошибка API: {resp.status}\n{data}")
-            return
-
-        free_models = [
-            m for m in data.get("data", [])
-            if ":free" in m.get("id", "") or m.get("pricing", {}).get("prompt") == "0"
-        ]
-
-        if not free_models:
-            await msg.edit_text("😶 Бесплатных моделей не найдено.")
-            return
-
-        lines = [f"✅ Доступных бесплатных моделей: {len(free_models)}\n"]
-        for m in free_models[:20]:
-            lines.append(f"• `{m['id']}`")
-        if len(free_models) > 20:
-            lines.append(f"\n...и ещё {len(free_models) - 20}")
-
-        await msg.edit_text("\n".join(lines), parse_mode="Markdown")
-
-    except Exception as e:
-        await msg.edit_text(f"❌ Ошибка: {e}")
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    if not is_allowed(message.from_user.id):
+        return
+    stats = await get_stats(message.from_user.id)
+    current = get_user_model(message.from_user.id)
+    model_info = AVAILABLE_MODELS.get(current, {})
+    await message.answer(
+        f"📊 Статистика\n\n"
+        f"Задач: {stats['total_tasks']}\n"
+        f"Изменений: {stats['code_changes']}\n"
+        f"Токенов сегодня: {stats['today_tokens']:,}\n\n"
+        f"🤖 {model_info.get('emoji','')} {model_info.get('name','')}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+        ]])
+    )
 
 
 @router.message(Command("changes"))
 async def cmd_changes(message: Message):
-    """История изменений с кнопками отката."""
     if not is_allowed(message.from_user.id):
         return
-
     changes = await get_changes_with_rollback(message.from_user.id, limit=8)
     if not changes:
         await message.answer("📋 Изменений пока нет.")
         return
-
     for ch in changes:
         date = ch["changed_at"][:16].replace("T", " ")
         status = "↩️ откатано" if ch["status"] == "rolled_back" else "✅ применено"
-        text = f"{status} | {date}\n📄 {ch['file_path']}\n{ch['description'][:60]}"
-
         kb = None
         if ch["status"] != "rolled_back" and ch.get("has_rollback"):
             kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="↩️ Откатить", callback_data=f"rollback:{ch['id']}")
             ]])
-        await message.answer(text, reply_markup=kb)
+        await message.answer(f"{status} | {date}\n📄 {ch['file_path']}\n{ch['description'][:60]}", reply_markup=kb)
+
+
+@router.message(Command("model"))
+async def cmd_model(message: Message):
+    if not is_allowed(message.from_user.id):
+        return
+    current = get_user_model(message.from_user.id)
+    buttons = []
+    for key, info in AVAILABLE_MODELS.items():
+        mark = " ✅" if key == current else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{info['emoji']} {info['name']}{mark}",
+            callback_data=f"setmodel:{key}"
+        )])
+    await message.answer(
+        "🤖 Выбери нейросеть:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.message(Command("index"))
+async def cmd_index(message: Message):
+    if not is_allowed(message.from_user.id):
+        return
+    msg = await message.answer("🔄 Индексирую...")
+    index = await index_game()
+    if index.get("error"):
+        await msg.edit_text(f"❌ {index['error']}")
+    else:
+        await msg.edit_text(
+            f"✅ Готово! {index['file_count']} файлов, {index['total_lines']:,} строк",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="◀️ Меню", callback_data="menu:back")
+            ]])
+        )
+
+
+@router.message(Command("clear"))
+async def cmd_clear(message: Message):
+    if not is_allowed(message.from_user.id):
+        return
+    await clear_conversation(message.from_user.id)
+    await message.answer("🧹 Контекст очищен.")
 
 
 @router.message(Command("find"))
 async def cmd_find(message: Message):
-    """Ищет функцию/переменную в коде и показывает контекст."""
     if not is_allowed(message.from_user.id):
         return
-
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer(
-            "🔍 Использование: /find имя_функции\n\nПример: /find fireBullet"
-        )
+        await message.answer("🔍 Использование: /find имя_функции")
         return
-
     query = parts[1].strip()
-    msg = await message.answer(f"🔍 Ищу `{query}`...", parse_mode="Markdown")
-
+    msg = await message.answer(f"🔍 Ищу {query}...")
     index = load_index()
     if not index:
-        await msg.edit_text("❌ Игра не проиндексирована. Запусти /index")
+        await msg.edit_text("❌ Сначала обнови код")
         return
-
     found_blocks = []
     for file_info in index.get("files", [])[:20]:
         content = await _fetch_file(file_info["path"])
@@ -471,84 +441,7 @@ async def cmd_find(message: Message):
                     break
         if len(found_blocks) >= 3:
             break
-
     if not found_blocks:
-        await msg.edit_text(f"😶 `{query}` не найдено в коде.", parse_mode="Markdown")
+        await msg.edit_text(f"😶 {query} не найдено")
         return
-
     await msg.edit_text(f"🔍 {query}:\n\n" + "\n\n".join(found_blocks))
-
-
-@router.message(Command("todo"))
-async def cmd_todo(message: Message):
-    """Список задач."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    parts = message.text.split(maxsplit=1)
-
-    # /todo добавить текст задачи
-    if len(parts) > 1:
-        text = parts[1].strip()
-        await save_todo(message.from_user.id, text)
-        await message.answer(f"✅ Добавил в TODO: {text}")
-        return
-
-    # /todo — показать список
-    todos = await get_todos(message.from_user.id)
-
-    # Также ищем TODO в коде игры
-    index = load_index()
-    code_todos = []
-    if index and not index.get("error"):
-        for file_info in index.get("files", [])[:10]:
-            content = await _fetch_file(file_info["path"])
-            if not content:
-                continue
-            for i, line in enumerate(content.splitlines(), 1):
-                if "TODO" in line or "FIXME" in line or "HACK" in line:
-                    code_todos.append(f"  `{file_info['path']}:{i}` — {line.strip()[:60]}")
-                    if len(code_todos) >= 5:
-                        break
-            if len(code_todos) >= 5:
-                break
-
-    lines = ["📝 *TODO список:*\n"]
-
-    if todos:
-        for t in todos:
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Готово", callback_data=f"todo_done:{t['id']}")
-            ]])
-            await message.answer(f"• {t['text']}", reply_markup=kb)
-
-    if code_todos:
-        lines.append("\n🔍 *TODO в коде игры:*")
-        lines.extend(code_todos)
-
-    if not todos and not code_todos:
-        await message.answer("📝 TODO список пуст. Добавь: /todo текст задачи")
-        return
-
-    if lines:
-        await message.answer("\n".join(lines), parse_mode="Markdown")
-
-
-@router.message(Command("pull"))
-async def cmd_pull(message: Message):
-    """Подтягивает свежий код с GitHub и переиндексирует."""
-    if not is_allowed(message.from_user.id):
-        return
-
-    msg = await message.answer("🔄 Подтягиваю свежий код с GitHub...")
-    index = await index_game()
-
-    if index.get("error"):
-        await msg.edit_text(f"❌ Ошибка: {index['error']}")
-    else:
-        await msg.edit_text(
-            f"✅ Код обновлён с GitHub!\n\n"
-            f"Файлов: {index['file_count']}\n"
-            f"Строк: {index['total_lines']:,}\n"
-            f"Функций: {len(index['functions'])}"
-        )

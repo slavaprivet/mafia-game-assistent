@@ -338,7 +338,7 @@ async def _heartbeat(status_msg: Message, base_text: str, task_id: int, interval
         elapsed += interval
         try:
             await status_msg.edit_text(
-                f"{base_text}\n⏱ {elapsed} сек...",
+                f"{base_text}\n⏳ {elapsed}с — пишу код...",
                 reply_markup=_stop_keyboard(task_id)
             )
         except Exception:
@@ -535,7 +535,7 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                 context_files = unique_files
                 short_names = [Path(f).name for f in unique_files]
                 await status_msg.edit_text(
-                    f"📄 {', '.join(short_names)}...",
+                    f"📂 Читаю код ({', '.join(short_names)})...",
                     reply_markup=_stop_keyboard(task_id)
                 )
                 # Расширяем запрос для поиска нужного фрагмента
@@ -632,9 +632,9 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
 
         if context_files:
             files_str = ', '.join(Path(f).name for f in context_files)
-            thinking_text = f"📄 {files_str}\n{model_info['emoji']} думает..."
+            thinking_text = f"🧠 В процессе... ({files_str})"
         else:
-            thinking_text = f"{model_info['emoji']} думает..."
+            thinking_text = f"🧠 В процессе..."
         await status_msg.edit_text(thinking_text, reply_markup=_stop_keyboard(task_id))
 
         heartbeat = asyncio.create_task(_heartbeat(status_msg, thinking_text, task_id))
@@ -782,7 +782,7 @@ async def handle_text_task(message: Message):
     model_info = get_model_info(model_key)
 
     status_msg = await message.answer(
-        f"{model_info['emoji']} Думаю...",
+        f"⚙️ Делаю...",
         reply_markup=_stop_keyboard(task_id)
     )
 

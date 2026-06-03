@@ -26,10 +26,9 @@ from memory import (
 from ai_client import ask_code_model, get_user_model, get_model_info, AVAILABLE_MODELS, set_user_model
 from game_expert import search_in_code, read_relevant_files, load_index, index_game, _fetch_file, extract_game_patterns
 from limit_manager import check_limit, track_usage
+from handlers.state import pending_changes, pending_previews
 
 router = Router()
-
-pending_changes: dict[int, dict] = {}
 active_tasks: dict[int, asyncio.Task] = {}
 _last_message: dict[int, tuple[str, float]] = {}  # user_id -> (text, timestamp)
 
@@ -262,7 +261,7 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
     # ── ДОБАВИТЬ В ИГРУ (текстом) ─────────────────────────────
     add_kws = ["добавляем", "добавить в игру", "применяем", "применить", "ок добавь", "да добавь", "давай добавляй"]
     if any(kw in t for kw in add_kws):
-        from handlers.callbacks import pending_previews, pending_changes, _pages_url
+        from handlers.callbacks import _pages_url
         from game_expert import push_file_to_github, delete_file_from_github, _fetch_file
         from memory import save_code_change, save_rollback
 
@@ -304,7 +303,6 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
     # ── ОТМЕНИТЬ (текстом) ────────────────────────────────────
     cancel_kws = ["отменяем", "отменить", "не надо", "отмена", "не добавляй", "откатить"]
     if any(kw in t for kw in cancel_kws):
-        from handlers.callbacks import pending_previews, pending_changes
         from game_expert import delete_file_from_github
 
         preview_entry = next(
@@ -734,9 +732,10 @@ async def handle_text_task(message: Message):
         prev.cancel()
 
     # Чистим старые pending изменения и превью этого пользователя
-    from handlers.callbacks import pending_previews
     from game_expert import delete_file_from_github
     old_previews = [(tid, d) for tid, d in list(pending_previews.items()) if d.get("user_id") == user_id]
+    if old_previews:
+        await message.answer("🔄 Предыдущее превью отменено — берусь за новую задачу.")
     for tid, pdata in old_previews:
         asyncio.create_task(delete_file_from_github(pdata["preview_path"], "cleanup: new task started"))
         del pending_previews[tid]

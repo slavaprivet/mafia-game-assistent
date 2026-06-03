@@ -23,15 +23,12 @@ from loguru import logger
 from config import GITHUB_REPO, GITHUB_BRANCH
 from game_expert import push_file_to_github, delete_file_from_github, _fetch_file, insert_into_function
 from memory import save_code_change, save_rollback, get_rollback, mark_change_rolled_back, save_game_knowledge
-from handlers.text_tasks import pending_changes
+from handlers.state import pending_changes, pending_previews
 
 router = Router()
 
 _owner, _repo = GITHUB_REPO.split("/")
 GITHUB_PAGES_BASE = f"https://{_owner}.github.io/{_repo}"
-
-# task_id -> {"preview_path": str, "target_path": str, "new_content": str}
-pending_previews: dict[int, dict] = {}
 
 
 def _preview_filename(file_path: str) -> str:

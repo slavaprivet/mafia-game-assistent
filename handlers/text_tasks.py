@@ -729,6 +729,16 @@ async def handle_text_task(message: Message):
         return
     _last_message[user_id] = (text, now)
 
+    # Короткие слова-подтверждения не отменяют текущую задачу и не запускают AI
+    _noise_words = {"ок", "ok", "окей", "okay", "да", "нет", "понял", "понятно", "хорошо", "ладно", "угу", "ага"}
+    if text.lower() in _noise_words:
+        prev = active_tasks.get(user_id)
+        if prev and not prev.done():
+            await message.answer("⏳ Обрабатываю предыдущую задачу, подожди...")
+            return
+        # Нет активной задачи — просто игнорируем
+        return
+
     # Отменяем предыдущую задачу
     prev = active_tasks.get(user_id)
     if prev and not prev.done():

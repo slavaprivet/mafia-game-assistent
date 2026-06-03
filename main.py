@@ -134,19 +134,25 @@ async def main():
         except Exception:
             pass
 
+    # Принудительно забираем сессию у любого другого экземпляра
+    # (getUpdates с timeout=0 выбивает чужой polling, потом ждём пока тот умрёт)
+    for attempt in range(5):
+        try:
+            await bot.get_updates(offset=-1, timeout=0)
+            break
+        except Exception:
+            await asyncio.sleep(1)
+    await asyncio.sleep(2)
+    logger.info("🔒 Сессия захвачена, стартую polling...")
+
     try:
         await dp.start_polling(
             bot,
             allowed_updates=dp.resolve_used_update_types(),
-            drop_pending_updates=True,  # выгоняем старый экземпляр при старте
+            drop_pending_updates=True,
         )
     except Exception as e:
-        if "Conflict" in str(e):
-            for uid in ALLOWED_USERS:
-                try:
-                    await bot.send_message(uid, "⚠️ <b>Конфликт!</b> Бот запущен в двух местах одновременно. Останови локальную копию.")
-                except Exception:
-                    pass
+        logger.error(f"Ошибка polling: {e}")
         raise
     finally:
         await bot.session.close()

@@ -51,21 +51,43 @@ async def _fetch_tree() -> list[dict]:
 
 
 async def _fetch_file(path: str) -> str:
-    """Читает содержимое файла из GitHub (с кешем 5 мин)."""
+    """Читает содержимое файла из GitHub (с кешем 5 мин).
+    Сначала raw CDN, при неудаче — GitHub Contents API (свежий после пуша)."""
+    import base64
     now = time.time()
     if path in _file_cache:
         content, ts = _file_cache[path]
         if now - ts < CACHE_TTL:
             return content
 
-    url = f"{RAW_BASE}/{path}"
     async with aiohttp.ClientSession(headers=_headers()) as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status == 200:
-                content = await resp.text(errors="ignore")
-                _file_cache[path] = (content, now)
-                return content
-            return ""
+        # 1. Быстрый raw CDN
+        try:
+            url = f"{RAW_BASE}/{path}"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    content = await resp.text(errors="ignore")
+                    if content:
+                        _file_cache[path] = (content, now)
+                        return content
+        except Exception:
+            pass
+
+        # 2. Фоллбэк: Contents API — всегда актуален, работает для файлов <1MB
+        try:
+            api_url = f"{API_BASE}/contents/{path}"
+            async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    encoded = data.get("content", "").replace("\n", "")
+                    if encoded:
+                        content = base64.b64decode(encoded).decode("utf-8", errors="ignore")
+                        _file_cache[path] = (content, now)
+                        return content
+        except Exception:
+            pass
+
+    return ""
 
 
 async def index_game() -> dict:

@@ -141,6 +141,8 @@ async def callback_mkpreview(callback: CallbackQuery):
     )
 
     if not ok:
+        await callback.message.edit_reply_markup()
+        pending_changes.pop(task_id, None)
         await callback.message.answer("❌ Не удалось прочитать файл с GitHub.")
         return
 

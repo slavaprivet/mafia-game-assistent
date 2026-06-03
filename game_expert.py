@@ -155,7 +155,7 @@ def get_project_summary() -> str:
 
 
 async def search_in_code(query: str) -> list[dict]:
-    """Ищет текст в проиндексированных файлах через GitHub."""
+    """Ищет текст в проиндексированных файлах, возвращает совпадение + имя функции."""
     index = load_index()
     if not index:
         return []
@@ -168,24 +168,64 @@ async def search_in_code(query: str) -> list[dict]:
         content = await _fetch_file(path)
         if not content:
             continue
-        for i, line in enumerate(content.splitlines(), 1):
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
             if query_lower in line.lower():
-                results.append({"file": path, "line_num": i, "line_text": line.strip()})
+                # Находим имя ближайшей функции выше
+                func_name = ""
+                for j in range(i, max(-1, i - 80), -1):
+                    s = lines[j]
+                    if "function " in s and "(" in s:
+                        idx = s.index("function ") + 9
+                        end = s.index("(", idx) if "(" in s[idx:] else len(s)
+                        func_name = s[idx:end].strip()
+                        break
+                results.append({
+                    "file": path,
+                    "line_num": i + 1,
+                    "line_text": line.strip(),
+                    "func_name": func_name,
+                })
                 if len(results) >= 20:
                     return results
 
     return results
 
 
+def _find_function_bounds(lines: list[str], hit: int) -> tuple[int, int]:
+    """
+    Возвращает (start, end) функции, содержащей строку hit.
+    Ищет заголовок функции вверх, затем отслеживает скобки вниз.
+    """
+    func_start = -1
+    for i in range(hit, max(-1, hit - 120), -1):
+        s = lines[i]
+        if ("function " in s or ("=>" in s and "=" in s) or
+                (("const " in s or "let " in s or "var " in s) and "=" in s and "{" in s)):
+            func_start = i
+            break
+
+    if func_start == -1:
+        # Не нашли заголовок — возвращаем ±40 строк
+        return max(0, hit - 40), min(len(lines) - 1, hit + 40)
+
+    depth = 0
+    for i in range(func_start, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if depth <= 0 and i > func_start:
+            return func_start, i
+
+    return func_start, min(len(lines) - 1, func_start + 150)
+
+
 async def read_relevant_files(file_paths: list[str], max_chars: int = 12000, query: str = "") -> str:
     """
-    Читает только релевантные куски файлов (не весь файл).
-    Если есть query — вырезает контекст вокруг совпадений.
-    Без query — берёт первые N строк.
+    Читает релевантные куски файлов.
+    При query — извлекает целые функции с совпадениями, без обрезки посередине.
+    Без query — первые 80 строк.
     """
     result = []
     total_chars = 0
-    context_lines = 60  # строк вокруг совпадения
 
     for path in file_paths:
         if total_chars >= max_chars:
@@ -196,43 +236,45 @@ async def read_relevant_files(file_paths: list[str], max_chars: int = 12000, que
             continue
 
         lines = content.splitlines()
-        file_budget = min(max_chars - total_chars, max_chars // len(file_paths))
+        file_budget = min(max_chars - total_chars, max_chars // max(len(file_paths), 1))
 
         if query:
-            # Находим строки с совпадениями
             query_lower = query.lower()
             keywords = [w for w in query_lower.split() if len(w) > 3]
-            hit_lines = set()
-            for i, line in enumerate(lines):
-                line_lower = line.lower()
-                if any(kw in line_lower for kw in keywords):
-                    # Берём контекст вокруг совпадения
-                    start = max(0, i - context_lines)
-                    end = min(len(lines), i + context_lines)
-                    hit_lines.update(range(start, end))
 
-            if hit_lines:
-                # Собираем нужные строки с разделителями
+            # Находим строки-попадания
+            hits = [
+                i for i, line in enumerate(lines)
+                if any(kw in line.lower() for kw in keywords)
+            ]
+
+            if hits:
+                # Для каждого попадания — целая функция (объединяем пересекающиеся)
+                ranges: list[tuple[int, int]] = []
+                for h in hits:
+                    s, e = _find_function_bounds(lines, h)
+                    if ranges and s <= ranges[-1][1] + 5:
+                        ranges[-1] = (ranges[-1][0], max(ranges[-1][1], e))
+                    else:
+                        ranges.append((s, e))
+
                 selected = []
-                prev = -2
-                for i in sorted(hit_lines):
-                    if i > prev + 1:
-                        selected.append(f"... (строка {i+1}) ...")
-                    selected.append(lines[i])
-                    prev = i
+                prev_end = -1
+                for s, e in ranges:
+                    if prev_end >= 0:
+                        selected.append(f"\n... (строки {prev_end+2}–{s}) пропущены ...\n")
+                    selected.extend(lines[s:e + 1])
+                    prev_end = e
                 snippet = "\n".join(selected)
             else:
-                # Нет совпадений — берём начало файла
                 snippet = "\n".join(lines[:80])
         else:
-            # Без query — первые 80 строк
             snippet = "\n".join(lines[:80])
 
-        # Обрезаем по бюджету символов
         if len(snippet) > file_budget:
             snippet = snippet[:file_budget] + "\n... (обрезано)"
 
-        result.append(f"\n--- {path} ({len(lines)} строк, показан фрагмент) ---\n{snippet}")
+        result.append(f"\n--- {path} ({len(lines)} строк) ---\n{snippet}")
         total_chars += len(snippet)
 
     return "\n".join(result)

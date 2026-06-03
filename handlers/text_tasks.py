@@ -103,6 +103,7 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
         if not index:
             await msg.edit_text("❌ Сначала запусти индексацию: напиши 'обнови код'")
             return True
+        from game_expert import _find_function_bounds
         found = []
         for fi in index.get("files", [])[:20]:
             content = await _fetch_file(fi["path"])
@@ -111,9 +112,14 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
             lines = content.splitlines()
             for i, line in enumerate(lines):
                 if query in line.lower():
-                    start, end = max(0, i-2), min(len(lines), i+12)
-                    snippet = html.escape("\n".join(lines[start:end])[:600])
-                    found.append(f"📄 <code>{html.escape(fi['path'])}:{i+1}</code>\n<pre>{snippet}</pre>")
+                    start, end = _find_function_bounds(lines, i)
+                    func_lines = lines[start:end + 1]
+                    # Обрезаем если функция огромная — показываем первые 60 строк
+                    if len(func_lines) > 60:
+                        func_lines = func_lines[:60] + ["... (функция обрезана)"]
+                    snippet = html.escape("\n".join(func_lines)[:1200])
+                    header = html.escape(fi["path"])
+                    found.append(f"📄 <code>{header}:{start+1}–{end+1}</code>\n<pre>{snippet}</pre>")
                     if len(found) >= 3:
                         break
             if len(found) >= 3:

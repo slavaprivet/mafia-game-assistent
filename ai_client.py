@@ -112,7 +112,7 @@ _user_models: dict[int, str] = {}
 
 
 def get_user_model(user_id: int) -> str:
-    return _user_models.get(user_id, "gpt")
+    return _user_models.get(user_id, "gemini")
 
 
 def set_user_model(user_id: int, model_key: str):

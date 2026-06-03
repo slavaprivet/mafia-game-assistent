@@ -340,24 +340,14 @@ async def _heartbeat(status_msg: Message, base_text: str, task_id: int, interval
             pass
 
 
-def _strip_model_prefix(response: str) -> str:
-    """Убирает служебный префикс о переключении модели."""
-    if response.startswith("[") and "Переключился" in response[:120]:
-        parts = response.split("\n\n", 1)
-        if len(parts) > 1:
-            return parts[1]
-    return response
-
-
 def _extract_summary(response: str) -> str:
     """Берёт первую строку до блока кода — это отчёт что сделано."""
-    clean = _strip_model_prefix(response)
     for marker in ["БЫЛО:", "```", "Файл:"]:
-        if marker in clean:
-            before = clean.split(marker)[0].strip()
+        if marker in response:
+            before = response.split(marker)[0].strip()
             if before:
                 return before.split("\n\n")[0].strip()
-    return clean[:200].strip()
+    return response[:200].strip()
 
 
 def _detect_code_change(response: str) -> bool:
@@ -452,11 +442,13 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
             "• world.html — ГЛАВНЫЙ файл (открытый мир), используй по умолчанию\n"
             "• hub.html — хаб города, battle.html — бой, creator.html — редактор\n\n"
             "Когда делаешь изменение в коде — СТРОГО такой формат:\n"
-            "Сначала 1 строка: что именно добавлено/изменено (без лишних слов).\n"
-            "Затем блоки кода:\n"
-            "БЫЛО:\n```\nстарый код\n```\nСТАЛО:\n```\nновый код\n```\nФайл: имя_файла\n\n"
-            "ВАЖНО: пользователь видит только первую строку описания — код скрыт. "
-            "Не объясняй как работает код, только скажи что изменилось."
+            "Сначала 1 строка: что именно добавлено/изменено.\n"
+            "Затем:\n"
+            "БЫЛО:\n```\nСКОПИРУЙ ДОСЛОВНО строки из предоставленного кода без изменений\n```\n"
+            "СТАЛО:\n```\nновый код\n```\nФайл: имя_файла\n\n"
+            "КРИТИЧНО: блок БЫЛО — это точная копия строк из файла который тебе показали. "
+            "Не перефразируй, не меняй пробелы, не добавляй — копируй символ в символ. "
+            "Если не видел нужный участок кода — напиши только СТАЛО без БЫЛО."
             + index_summary
         )
 

@@ -12,19 +12,24 @@ from config import OPENROUTER_API_KEY, MAX_CONTEXT_SIZE
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 AVAILABLE_MODELS = {
+    "chatgpt": {
+        "id": "openai/gpt-4o-mini",
+        "name": "ChatGPT 4o mini",
+        "emoji": "🤖",
+    },
     "gpt": {
         "id": "openai/gpt-oss-120b:free",
         "name": "GPT OSS 120B",
         "emoji": "🟢",
     },
     "qwen": {
-        "id": "qwen/qwen3-next-80b-a3b-instruct:free",
-        "name": "Qwen3 80B",
+        "id": "qwen/qwen3-235b-a22b:free",
+        "name": "Qwen3 235B",
         "emoji": "🟣",
     },
-    "nvidia": {
-        "id": "nvidia/nemotron-3-super-120b-a12b:free",
-        "name": "Nemotron 120B",
+    "deepseek": {
+        "id": "deepseek/deepseek-chat:free",
+        "name": "DeepSeek V3",
         "emoji": "🔵",
     },
     "gemma": {
@@ -32,19 +37,19 @@ AVAILABLE_MODELS = {
         "name": "Gemma 4 31B",
         "emoji": "♊",
     },
+    "nvidia": {
+        "id": "nvidia/nemotron-3-super-120b-a12b:free",
+        "name": "Nemotron 120B",
+        "emoji": "🔵",
+    },
     "claude": {
         "id": "anthropic/claude-3.5-haiku",
         "name": "Claude 3.5 Haiku",
         "emoji": "🔶",
     },
-    "deepseek": {
-        "id": "deepseek/deepseek-chat:free",
-        "name": "DeepSeek V3",
-        "emoji": "🔵",
-    },
 }
 
-FALLBACK_ORDER = ["gpt", "qwen", "nvidia", "gemma", "deepseek"]
+FALLBACK_ORDER = ["gpt", "qwen", "deepseek", "gemma", "nvidia"]
 
 
 _user_models: dict[int, str] = {}

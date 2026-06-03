@@ -73,17 +73,44 @@ async def _fetch_file(path: str) -> str:
         except Exception:
             pass
 
-        # 2. Фоллбэк: Contents API — всегда актуален, работает для файлов <1MB
+        # 2. Фоллбэк: Git Blob API через дерево коммита — любой размер, всегда свежий
         try:
-            api_url = f"{API_BASE}/contents/{path}"
-            async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            # Получаем SHA последнего коммита
+            async with session.get(
+                f"{API_BASE}/git/ref/heads/{GITHUB_BRANCH}",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    encoded = data.get("content", "").replace("\n", "")
-                    if encoded:
-                        content = base64.b64decode(encoded).decode("utf-8", errors="ignore")
-                        _file_cache[path] = (content, now)
-                        return content
+                    ref_data = await resp.json()
+                    commit_sha = ref_data["object"]["sha"]
+                else:
+                    raise Exception(f"ref status {resp.status}")
+
+            # Получаем дерево (не рекурсивное — только верхний уровень для world.html)
+            async with session.get(
+                f"{API_BASE}/git/trees/{commit_sha}",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    tree_data = await resp.json()
+                    blob_sha = next(
+                        (item["sha"] for item in tree_data.get("tree", []) if item["path"] == path),
+                        None
+                    )
+                else:
+                    raise Exception(f"tree status {resp.status}")
+
+            if blob_sha:
+                async with session.get(
+                    f"{API_BASE}/git/blobs/{blob_sha}",
+                    headers={**_headers(), "Accept": "application/vnd.github.raw"},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        content = await resp.text(errors="ignore")
+                        if content:
+                            _file_cache[path] = (content, now)
+                            return content
         except Exception:
             pass
 

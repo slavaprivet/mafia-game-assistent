@@ -88,8 +88,9 @@ async def main():
     )
     dp = Dispatcher()
 
-    from handlers import commands, text_tasks, media_tasks, callbacks
+    from handlers import commands, text_tasks, media_tasks, callbacks, voice_tasks
     dp.include_router(commands.router)
+    dp.include_router(voice_tasks.router)
     dp.include_router(text_tasks.router)
     dp.include_router(media_tasks.router)
     dp.include_router(callbacks.router)

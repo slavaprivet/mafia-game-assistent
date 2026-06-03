@@ -49,9 +49,14 @@ async def _check_preview_available(bot: Bot, chat_id: int, url: str, task_id: in
     await asyncio.sleep(interval)
     async with aiohttp.ClientSession() as session:
         for attempt in range(retries):
+            # Превью уже добавлено или отменено — молчим
+            if task_id not in pending_previews:
+                return
             try:
                 async with session.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status == 200:
+                        if task_id not in pending_previews:
+                            return
                         await bot.send_message(
                             chat_id,
                             f"✅ Превью доступно!\n{url}\n\nЕсли всё ок — жми ✅ Добавить в игру выше.",
@@ -62,6 +67,8 @@ async def _check_preview_available(bot: Bot, chat_id: int, url: str, task_id: in
             if attempt < retries - 1:
                 await asyncio.sleep(interval)
 
+    if task_id not in pending_previews:
+        return
     await bot.send_message(
         chat_id,
         f"⚠️ Превью ещё не появилось через {retries * interval // 60} мин.\n"

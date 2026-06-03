@@ -61,9 +61,7 @@ async def handle_voice(message: Message):
     if not recognized_text:
         await status_msg.edit_text(
             "❌ Не удалось распознать речь.\n\n"
-            "Проверь что Whisper установлен: `pip install openai-whisper`\n"
-            "Или напиши задачу текстом.",
-            parse_mode="Markdown"
+            "Groq Whisper не ответил — попробуй ещё раз или напиши текстом.",
         )
         return
 

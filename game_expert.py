@@ -379,7 +379,7 @@ async def push_file_to_github(path: str, content: str, commit_message: str) -> t
                     text = await resp.text()
                     return False, f"Ошибка обновления ветки: {resp.status}: {text[:200]}"
 
-            _file_cache.pop(path, None)  # сбрасываем кеш
+            _file_cache[path] = (content, time.time())  # свежий контент сразу в кэш
             return True, f"Файл {path} сохранён на GitHub"
 
         except Exception as e:

@@ -389,6 +389,52 @@ def _needs_code_context(text: str) -> bool:
     return any(kw in t for kw in code_signals)
 
 
+# Перевод русских игровых понятий → английские термины в коде
+_RU_TO_EN = {
+    "нпс": ["npc", "NPC", "spawn"],
+    "нпц": ["npc", "NPC"],
+    "персонаж": ["player", "character", "npc"],
+    "спавн": ["spawn"],
+    "бандит": ["gang", "bandit", "enemy"],
+    "банда": ["gang", "Gang"],
+    "коп": ["cop", "police", "Police"],
+    "копы": ["cop", "police"],
+    "игрок": ["player", "Player"],
+    "ходит": ["walk", "move", "patrol"],
+    "анимац": ["anim", "animation", "idle"],
+    "покачива": ["sway", "idle", "walk"],
+    "район": ["district", "zone", "capture"],
+    "захват": ["capture", "zone"],
+    "оружи": ["weapon", "gun", "fire"],
+    "стрельб": ["fire", "shoot", "bullet"],
+    "здание": ["building", "house"],
+    "тюрьм": ["jail", "prison"],
+    "логово": ["lair", "base", "arena"],
+    "торговец": ["merchant", "shop", "market"],
+    "рынок": ["market", "shop"],
+    "больниц": ["hospital", "heal"],
+    "деньг": ["money", "cash", "gold"],
+    "уровень": ["level", "exp", "xp"],
+    "машин": ["car", "vehicle"],
+    "пуля": ["bullet", "projectile"],
+    "взрыв": ["explode", "explosion"],
+    "звук": ["sound", "audio"],
+    "камер": ["camera", "view"],
+    "мини.карт": ["minimap", "map"],
+    "инвентарь": ["inventory", "items"],
+}
+
+
+def _expand_search(text: str) -> list[str]:
+    """Возвращает английские термины для русских слов в тексте."""
+    terms = []
+    t = text.lower()
+    for ru, en_list in _RU_TO_EN.items():
+        if ru in t:
+            terms.extend(en_list)
+    return list(dict.fromkeys(terms))  # убираем дубли
+
+
 async def _process_task(user_id: int, task_id: int, text: str, status_msg: Message, model_info: dict):
     try:
         index = load_index()
@@ -398,7 +444,7 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
         if _needs_code_context(text) and index and not index.get("error"):
             text_lower = text.lower()
 
-            # 1. Файл явно упомянут в тексте — используем его
+            # 1. Файл явно упомянут в тексте
             named_files = [
                 f["path"] for f in index.get("files", [])
                 if Path(f["path"]).name.lower() in text_lower
@@ -408,10 +454,27 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
             if named_files:
                 unique_files = named_files[:3]
             else:
-                # 2. Ищем по коду — берём только то что реально нашлось
+                # 2. Ищем по коду русским текстом
                 search_results = await search_in_code(text)
+
+                # 3. Если не нашли — ищем по английским терминам
+                if not search_results:
+                    for en_term in _expand_search(text)[:4]:
+                        extra = await search_in_code(en_term)
+                        search_results.extend(extra)
+                        if len(search_results) >= 3:
+                            break
+
                 unique_files = list(dict.fromkeys(r["file"] for r in search_results[:3]))
-                # Не добавляем world.html автоматически — только если поиск его вернул
+
+                # 4. Если всё равно ничего — берём world.html (главный файл)
+                if not unique_files:
+                    world = next(
+                        (f["path"] for f in index.get("files", []) if "world" in f["path"].lower()),
+                        None
+                    )
+                    if world:
+                        unique_files = [world]
 
             if unique_files:
                 context_files = unique_files
@@ -420,7 +483,9 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                     f"📄 {', '.join(short_names)}...",
                     reply_markup=_stop_keyboard(task_id)
                 )
-                code_context = await read_relevant_files(unique_files, max_chars=12000, query=text)
+                # Расширяем запрос для поиска нужного фрагмента
+                search_query = text + " " + " ".join(_expand_search(text)[:3])
+                code_context = await read_relevant_files(unique_files, max_chars=12000, query=search_query)
         # Если код не нужен или не найден — идём к AI без контекста (это нормально)
 
         index_summary = ""

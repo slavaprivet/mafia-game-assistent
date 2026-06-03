@@ -94,8 +94,28 @@ async def main():
     me = await bot.get_me()
     logger.info(f"✅ Бот @{me.username} запущен!")
 
+    # Уведомляем владельца о запуске
+    for uid in ALLOWED_USERS:
+        try:
+            await bot.send_message(
+                uid,
+                "🚀 <b>Бот запущен на Railway</b>\n\n"
+                "Если получил это сообщение дважды — у тебя запущена локальная копия. "
+                "Останови её, иначе бот работать не будет."
+            )
+        except Exception:
+            pass
+
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except Exception as e:
+        if "Conflict" in str(e):
+            for uid in ALLOWED_USERS:
+                try:
+                    await bot.send_message(uid, "⚠️ <b>Конфликт!</b> Бот запущен в двух местах одновременно. Останови локальную копию.")
+                except Exception:
+                    pass
+        raise
     finally:
         await bot.session.close()
         logger.info("👋 Бот остановлен")

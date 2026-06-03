@@ -251,6 +251,77 @@ async def _handle_nlp(message: Message, user_id: int, text: str) -> bool:
             )
         return True
 
+    # ── ДОБАВИТЬ В ИГРУ (текстом) ─────────────────────────────
+    add_kws = ["добавляем", "добавить в игру", "применяем", "применить", "ок добавь", "да добавь", "давай добавляй"]
+    if any(kw in t for kw in add_kws):
+        from handlers.callbacks import pending_previews, pending_changes, _pages_url
+        from game_expert import push_file_to_github, delete_file_from_github, _fetch_file
+        from memory import save_code_change, save_rollback
+
+        # Ищем активное превью пользователя
+        preview_entry = next(
+            ((tid, d) for tid, d in pending_previews.items() if d.get("user_id") == user_id),
+            None
+        )
+        if preview_entry:
+            task_id_found, pdata = preview_entry
+            msg = await message.answer("⏳ Добавляю в игру...")
+            old_content = await _fetch_file(pdata["target_path"])
+            ok, err = await push_file_to_github(pdata["target_path"], pdata["new_content"], f"feat: approved via text")
+            if ok:
+                change_id = await save_code_change(task_id_found, pdata["target_path"], "main", "", pdata["change"].get("description", "")[:100], "")
+                if old_content and change_id:
+                    await save_rollback(change_id, pdata["target_path"], old_content)
+                await delete_file_from_github(pdata["preview_path"], "cleanup: approved")
+                del pending_previews[task_id_found]
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩️ Отменить изменение", callback_data=f"rollback:{change_id}")]])
+                await msg.edit_text(f"✅ Добавлено в игру!\n\n🌐 {_pages_url(pdata['target_path'])}", reply_markup=kb)
+            else:
+                await msg.edit_text(f"❌ {err}")
+            return True
+
+        # Нет превью — ищем ожидающее изменение
+        change_entry = next(
+            ((tid, d) for tid, d in pending_changes.items() if d.get("user_id") == user_id),
+            None
+        )
+        if change_entry:
+            await message.answer("Нажми кнопку ✅ Добавить в игру под последним сообщением бота.")
+            return True
+
+        await message.answer("Нет активных изменений для добавления.")
+        return True
+
+    # ── ОТМЕНИТЬ (текстом) ────────────────────────────────────
+    cancel_kws = ["отменяем", "отменить", "не надо", "отмена", "не добавляй", "откатить"]
+    if any(kw in t for kw in cancel_kws):
+        from handlers.callbacks import pending_previews, pending_changes
+        from game_expert import delete_file_from_github
+
+        preview_entry = next(
+            ((tid, d) for tid, d in pending_previews.items() if d.get("user_id") == user_id),
+            None
+        )
+        if preview_entry:
+            task_id_found, pdata = preview_entry
+            await delete_file_from_github(pdata["preview_path"], "cleanup: cancelled")
+            del pending_previews[task_id_found]
+            await message.answer("↩️ Превью удалено. Опиши задачу иначе если нужно другое решение.")
+            return True
+
+        change_entry = next(
+            ((tid, d) for tid, d in pending_changes.items() if d.get("user_id") == user_id),
+            None
+        )
+        if change_entry:
+            del pending_changes[change_entry[0]]
+            await message.answer("↩️ Отменено.")
+            return True
+
+        await message.answer("Нет активных изменений для отмены.")
+        return True
+
     return False  # не распознали — идём в AI
 
 

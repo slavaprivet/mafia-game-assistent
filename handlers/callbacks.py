@@ -96,6 +96,7 @@ async def callback_mkpreview(callback: CallbackQuery):
         return
 
     pending_previews[task_id] = {
+        "user_id": callback.from_user.id,
         "preview_path": preview_path,
         "target_path": change["file"],
         "new_content": new_content,

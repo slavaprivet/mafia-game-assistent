@@ -47,12 +47,11 @@ def _stop_keyboard(task_id: int) -> InlineKeyboardMarkup:
 def _change_keyboard(task_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Применить", callback_data=f"apply:{task_id}"),
-            InlineKeyboardButton(text="📝 Показать файл", callback_data=f"showfile:{task_id}"),
+            InlineKeyboardButton(text="🎮 Превью", callback_data=f"mkpreview:{task_id}"),
+            InlineKeyboardButton(text="✅ Добавить в игру", callback_data=f"apply:{task_id}"),
         ],
         [
-            InlineKeyboardButton(text="🌐 Превью", callback_data=f"branch:{task_id}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{task_id}"),
+            InlineKeyboardButton(text="↩️ Отменить", callback_data=f"reject:{task_id}"),
         ]
     ])
 

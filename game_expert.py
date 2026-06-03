@@ -285,6 +285,29 @@ async def push_file_to_github(path: str, content: str, commit_message: str) -> t
                 return False, f"Ошибка GitHub API {resp.status}: {text[:200]}"
 
 
+async def delete_file_from_github(path: str, commit_message: str) -> tuple[bool, str]:
+    """Удаляет файл из GitHub репозитория."""
+    if not GITHUB_TOKEN:
+        return False, "GITHUB_TOKEN не задан"
+
+    url = f"{API_BASE}/contents/{path}"
+
+    async with aiohttp.ClientSession(headers=_headers()) as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return False, f"Файл {path} не найден"
+            data = await resp.json()
+            sha = data.get("sha")
+
+        import base64 as _b64
+        payload = {"message": commit_message, "sha": sha, "branch": GITHUB_BRANCH}
+        async with session.delete(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status == 200:
+                return True, f"Файл {path} удалён"
+            text = await resp.text()
+            return False, f"Ошибка удаления {resp.status}: {text[:200]}"
+
+
 def format_index_message() -> str:
     index = load_index()
     if not index or index.get("error"):

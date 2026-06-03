@@ -104,15 +104,15 @@ AVAILABLE_MODELS = {
 
 # Прямые сначала → OpenRouter в конце как резерв
 FALLBACK_ORDER = [
-    "gemini", "cerebras", "llama", "deepseek-direct",
-    "llama-fast", "gpt", "qwen", "deepseek", "gemma", "nvidia",
+    "deepseek-direct", "cerebras", "llama", "llama-fast",
+    "gpt", "qwen", "deepseek", "gemma", "nvidia",
 ]
 
 _user_models: dict[int, str] = {}
 
 
 def get_user_model(user_id: int) -> str:
-    return _user_models.get(user_id, "gemini")
+    return _user_models.get(user_id, "deepseek-direct")
 
 
 def set_user_model(user_id: int, model_key: str):

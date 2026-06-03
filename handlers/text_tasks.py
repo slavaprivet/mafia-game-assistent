@@ -372,6 +372,11 @@ def _parse_code_change(response: str) -> dict:
         change["new_code"] = code_blocks[1].strip()
     elif len(code_blocks) == 1:
         change["new_code"] = code_blocks[0].strip()
+
+    # Если AI не указал файл — по умолчанию world.html (главный файл игры)
+    if not change["file"]:
+        change["file"] = "world.html"
+
     return change
 
 
@@ -510,6 +515,16 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                     )
                     if world:
                         unique_files = [world]
+
+                # 5. Всегда ставим world.html первым если он есть в списке
+                world_file = next(
+                    (f["path"] for f in index.get("files", []) if "world" in f["path"].lower()),
+                    None
+                )
+                if world_file and world_file not in unique_files:
+                    unique_files = [world_file] + unique_files[:2]
+                elif world_file and unique_files and unique_files[0] != world_file:
+                    unique_files = [world_file] + [f for f in unique_files if f != world_file][:2]
 
             if unique_files:
                 context_files = unique_files

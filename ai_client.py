@@ -1,25 +1,63 @@
 """
-AI клиент с двумя провайдерами:
-  1. OpenRouter — множество моделей, бесплатные + платные
-  2. Groq — быстрый резервный провайдер (Llama), если OpenRouter недоступен
+AI клиент с несколькими прямыми провайдерами:
+  1. Gemini  — Google AI Studio (прямой, бесплатный)
+  2. Groq    — быстрый Llama (прямой, бесплатный)
+  3. Cerebras — сверхбыстрый Llama (прямой, бесплатный)
+  4. DeepSeek — умный и дешёвый (прямой)
+  5. OpenRouter — резерв когда всё остальное упало
 """
 
 import aiohttp
 import base64
 from pathlib import Path
 from loguru import logger
-from config import OPENROUTER_API_KEY, GROQ_API_KEY, MAX_CONTEXT_SIZE
+from config import OPENROUTER_API_KEY, GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, MAX_CONTEXT_SIZE
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 AVAILABLE_MODELS = {
-    "chatgpt": {
-        "id": "openai/gpt-4o-mini",
-        "name": "ChatGPT 4o mini",
-        "emoji": "🤖",
-        "provider": "openrouter",
+    # === ПРЯМЫЕ ПРОВАЙДЕРЫ (приоритет) ===
+    "gemini": {
+        "id": "gemini-2.0-flash",
+        "name": "Gemini 2.0 Flash",
+        "emoji": "✨",
+        "provider": "gemini",
     },
+    "gemini-pro": {
+        "id": "gemini-1.5-pro",
+        "name": "Gemini 1.5 Pro",
+        "emoji": "🌟",
+        "provider": "gemini",
+    },
+    "cerebras": {
+        "id": "llama-3.3-70b",
+        "name": "Llama 3.3 70B (Cerebras)",
+        "emoji": "⚡",
+        "provider": "cerebras",
+    },
+    "deepseek-direct": {
+        "id": "deepseek-chat",
+        "name": "DeepSeek V3 (прямой)",
+        "emoji": "🔵",
+        "provider": "deepseek",
+    },
+    "llama": {
+        "id": "llama-3.3-70b-versatile",
+        "name": "Llama 3.3 70B (Groq)",
+        "emoji": "🦙",
+        "provider": "groq",
+    },
+    "llama-fast": {
+        "id": "llama-3.1-8b-instant",
+        "name": "Llama 3.1 8B (Groq)",
+        "emoji": "🐇",
+        "provider": "groq",
+    },
+    # === OPENROUTER (резерв) ===
     "gpt": {
         "id": "openai/gpt-oss-120b:free",
         "name": "GPT OSS 120B",
@@ -34,7 +72,7 @@ AVAILABLE_MODELS = {
     },
     "deepseek": {
         "id": "deepseek/deepseek-chat:free",
-        "name": "DeepSeek V3",
+        "name": "DeepSeek V3 (OR)",
         "emoji": "🔵",
         "provider": "openrouter",
     },
@@ -47,20 +85,8 @@ AVAILABLE_MODELS = {
     "nvidia": {
         "id": "nvidia/nemotron-3-super-120b-a12b:free",
         "name": "Nemotron 120B",
-        "emoji": "🔵",
+        "emoji": "🟦",
         "provider": "openrouter",
-    },
-    "llama": {
-        "id": "llama-3.3-70b-versatile",
-        "name": "Llama 3.3 70B (Groq)",
-        "emoji": "🦙",
-        "provider": "groq",
-    },
-    "llama-fast": {
-        "id": "llama-3.1-8b-instant",
-        "name": "Llama 3.1 8B fast (Groq)",
-        "emoji": "⚡",
-        "provider": "groq",
     },
     "claude": {
         "id": "anthropic/claude-3.5-haiku",
@@ -68,10 +94,19 @@ AVAILABLE_MODELS = {
         "emoji": "🔶",
         "provider": "openrouter",
     },
+    "chatgpt": {
+        "id": "openai/gpt-4o-mini",
+        "name": "ChatGPT 4o mini",
+        "emoji": "🤖",
+        "provider": "openrouter",
+    },
 }
 
-# Порядок fallback — OpenRouter сначала, Groq как резерв
-FALLBACK_ORDER = ["gpt", "qwen", "deepseek", "gemma", "nvidia", "llama", "llama-fast"]
+# Прямые сначала → OpenRouter в конце как резерв
+FALLBACK_ORDER = [
+    "gemini", "cerebras", "llama", "deepseek-direct",
+    "llama-fast", "gpt", "qwen", "deepseek", "gemma", "nvidia",
+]
 
 _user_models: dict[int, str] = {}
 
@@ -124,6 +159,117 @@ async def _call_openrouter(model_id: str, messages: list, system_prompt: str = N
             answer = choices[0].get("message", {}).get("content", "")
             if not answer:
                 raise Exception(f"Пустой content от {model_id}")
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+            return answer, tokens
+
+
+async def _call_gemini(model_id: str, messages: list, system_prompt: str = None) -> tuple[str, int]:
+    if not GEMINI_API_KEY:
+        raise Exception("GEMINI_API_KEY не задан")
+
+    msgs = []
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
+    msgs.extend(messages)
+
+    headers = {
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            GEMINI_URL,
+            json={"model": model_id, "messages": msgs, "max_tokens": 4096},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=25)
+        ) as resp:
+            data = await resp.json()
+            if resp.status == 429:
+                raise RateLimitError(f"Gemini rate limit на {model_id}")
+            if resp.status != 200:
+                error = data.get("error", {}).get("message", str(data))
+                raise Exception(f"Gemini {resp.status}: {error}")
+            choices = data.get("choices") or []
+            if not choices:
+                raise Exception(f"Пустой ответ от Gemini {model_id}")
+            answer = choices[0].get("message", {}).get("content", "")
+            if not answer:
+                raise Exception(f"Пустой content от Gemini {model_id}")
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+            return answer, tokens
+
+
+async def _call_cerebras(model_id: str, messages: list, system_prompt: str = None) -> tuple[str, int]:
+    if not CEREBRAS_API_KEY:
+        raise Exception("CEREBRAS_API_KEY не задан")
+
+    msgs = []
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
+    msgs.extend(messages)
+
+    headers = {
+        "Authorization": f"Bearer {CEREBRAS_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            CEREBRAS_URL,
+            json={"model": model_id, "messages": msgs, "max_tokens": 4096},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=20)
+        ) as resp:
+            data = await resp.json()
+            if resp.status == 429:
+                raise RateLimitError(f"Cerebras rate limit на {model_id}")
+            if resp.status != 200:
+                error = data.get("error", {}).get("message", str(data))
+                raise Exception(f"Cerebras {resp.status}: {error}")
+            choices = data.get("choices") or []
+            if not choices:
+                raise Exception(f"Пустой ответ от Cerebras {model_id}")
+            answer = choices[0].get("message", {}).get("content", "")
+            if not answer:
+                raise Exception(f"Пустой content от Cerebras {model_id}")
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+            return answer, tokens
+
+
+async def _call_deepseek(model_id: str, messages: list, system_prompt: str = None) -> tuple[str, int]:
+    if not DEEPSEEK_API_KEY:
+        raise Exception("DEEPSEEK_API_KEY не задан")
+
+    msgs = []
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
+    msgs.extend(messages)
+
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            DEEPSEEK_URL,
+            json={"model": model_id, "messages": msgs, "max_tokens": 4096},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as resp:
+            data = await resp.json()
+            if resp.status == 429:
+                raise RateLimitError(f"DeepSeek rate limit на {model_id}")
+            if resp.status != 200:
+                error = data.get("error", {}).get("message", str(data))
+                raise Exception(f"DeepSeek {resp.status}: {error}")
+            choices = data.get("choices") or []
+            if not choices:
+                raise Exception(f"Пустой ответ от DeepSeek {model_id}")
+            answer = choices[0].get("message", {}).get("content", "")
+            if not answer:
+                raise Exception(f"Пустой content от DeepSeek {model_id}")
             tokens = data.get("usage", {}).get("total_tokens", 0)
             return answer, tokens
 
@@ -184,7 +330,13 @@ async def ask_code_model(
         model = AVAILABLE_MODELS[model_key]
         try:
             logger.debug(f"Пробую {model['name']} для user {user_id}")
-            if model["provider"] == "groq":
+            if model["provider"] == "gemini":
+                answer, tokens = await _call_gemini(model["id"], messages, system_prompt)
+            elif model["provider"] == "cerebras":
+                answer, tokens = await _call_cerebras(model["id"], messages, system_prompt)
+            elif model["provider"] == "deepseek":
+                answer, tokens = await _call_deepseek(model["id"], messages, system_prompt)
+            elif model["provider"] == "groq":
                 answer, tokens = await _call_groq(model["id"], messages, system_prompt)
             else:
                 answer, tokens = await _call_openrouter(model["id"], messages, system_prompt)

@@ -21,6 +21,9 @@ ALLOWED_USERS: list[int] = [
 # === AI API ===
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+CEREBRAS_API_KEY: str = os.getenv("CEREBRAS_API_KEY", "")
+DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 
 # === ПУТИ ===
 BASE_DIR: Path = Path(__file__).parent

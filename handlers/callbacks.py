@@ -125,7 +125,8 @@ async def callback_mkpreview(callback: CallbackQuery):
     change_data = pending_changes.get(task_id)
 
     if not change_data:
-        await callback.answer("❌ Задача не найдена")
+        await callback.answer("⚠️ Бот перезапускался — повтори задачу текстом", show_alert=True)
+        await callback.message.edit_reply_markup()
         return
 
     await callback.answer("⏳ Создаю превью...")
@@ -189,7 +190,8 @@ async def callback_addtogame(callback: CallbackQuery):
     preview_data = pending_previews.get(task_id)
 
     if not preview_data:
-        await callback.answer("❌ Превью не найдено")
+        await callback.answer("⚠️ Бот перезапускался — повтори задачу текстом", show_alert=True)
+        await callback.message.edit_reply_markup()
         return
 
     await callback.answer("⏳ Добавляю в игру...")

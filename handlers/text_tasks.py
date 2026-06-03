@@ -719,10 +719,13 @@ async def handle_text_task(message: Message):
     if text.startswith("/"):
         return
 
-    # Защита от дублей — одно и то же сообщение в течение 15 сек игнорируем
+    # Защита от дублей — одно и то же сообщение в течение 15 сек
     now = time.time()
     last_text, last_ts = _last_message.get(user_id, ("", 0))
-    if text == last_text and now - last_ts < 15:
+    has_pending = any(d.get("user_id") == user_id for d in pending_changes.values()) or \
+                  any(d.get("user_id") == user_id for d in pending_previews.values())
+    if text == last_text and now - last_ts < 15 and not has_pending:
+        await message.answer("⏳ Уже обрабатываю — подожди секунду или напиши чуть иначе.")
         return
     _last_message[user_id] = (text, now)
 

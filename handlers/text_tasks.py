@@ -340,15 +340,24 @@ async def _heartbeat(status_msg: Message, base_text: str, task_id: int, interval
             pass
 
 
+def _strip_model_prefix(response: str) -> str:
+    """Убирает служебный префикс о переключении модели."""
+    if response.startswith("[") and "Переключился" in response[:120]:
+        parts = response.split("\n\n", 1)
+        if len(parts) > 1:
+            return parts[1]
+    return response
+
+
 def _extract_summary(response: str) -> str:
     """Берёт первую строку до блока кода — это отчёт что сделано."""
+    clean = _strip_model_prefix(response)
     for marker in ["БЫЛО:", "```", "Файл:"]:
-        if marker in response:
-            before = response.split(marker)[0].strip()
+        if marker in clean:
+            before = clean.split(marker)[0].strip()
             if before:
-                # Берём только первый абзац
                 return before.split("\n\n")[0].strip()
-    return response[:200].strip()
+    return clean[:200].strip()
 
 
 def _detect_code_change(response: str) -> bool:

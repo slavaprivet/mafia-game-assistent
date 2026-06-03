@@ -41,22 +41,26 @@ def _pages_url(file_path: str) -> str:
     return f"{GITHUB_PAGES_BASE}/{file_path}"
 
 
-async def _build_new_content(file_path: str, old_code: str | None, new_code: str, task_id: int) -> tuple[bool, str, str]:
-    """Читает файл с GitHub, вставляет изменение. Возвращает (ok, new_content, old_content)."""
+async def _build_new_content(file_path: str, old_code: str | None, new_code: str, task_id: int) -> tuple[bool, str, str, bool]:
+    """Читает файл с GitHub, вставляет изменение.
+    Возвращает (ok, new_content, old_content, exact_match).
+    exact_match=False если точный код не найден — добавили в конец."""
     content = await _fetch_file(file_path)
     if not content:
-        return False, "", ""
+        return False, "", "", False
 
     old_content = content
 
     if old_code and old_code in content:
         new_content = content.replace(old_code, new_code, 1)
+        return True, new_content, old_content, True
     elif not old_code:
         new_content = content + "\n" + new_code
+        return True, new_content, old_content, True
     else:
-        return False, "", old_content
-
-    return True, new_content, old_content
+        # Точный код не найден — добавляем в конец файла
+        new_content = content + "\n\n/* Добавлено ботом */\n" + new_code
+        return True, new_content, old_content, False
 
 
 # ── 🎮 Превью ────────────────────────────────────────────────────────────────
@@ -77,18 +81,16 @@ async def callback_mkpreview(callback: CallbackQuery):
         await callback.message.answer("⚠️ Не могу создать превью — файл или код не определён.")
         return
 
-    ok, new_content, _ = await _build_new_content(
+    ok, new_content, _, exact = await _build_new_content(
         change["file"], change.get("old_code"), change["new_code"], task_id
     )
 
     if not ok:
-        await callback.message.answer(
-            "⚠️ Не нашёл точный код для замены.\n"
-            "Используй ✅ Добавить в игру — изменение применится вручную."
-        )
+        await callback.message.answer("❌ Не удалось прочитать файл с GitHub.")
         return
 
     preview_path = _preview_filename(change["file"])
+    warn = "" if exact else "\n\n⚠️ Точное место не найдено — код добавлен в конец файла. Проверь что всё ок."
     ok, msg = await push_file_to_github(preview_path, new_content, f"preview: task-{task_id}")
 
     if not ok:
@@ -115,7 +117,7 @@ async def callback_mkpreview(callback: CallbackQuery):
     await callback.message.edit_reply_markup()
     await callback.message.answer(
         f"🎮 Превью готово! Проверь — через 1–2 мин будет доступно:\n\n"
-        f"{preview_url}\n\n"
+        f"{preview_url}{warn}\n\n"
         f"Если всё ок — жми ✅ Добавить в игру.",
         reply_markup=kb
     )
@@ -195,16 +197,13 @@ async def callback_apply(callback: CallbackQuery):
         del pending_changes[task_id]
         return
 
-    ok, new_content, old_content = await _build_new_content(
+    ok, new_content, old_content, exact = await _build_new_content(
         change["file"], change.get("old_code"), change["new_code"], task_id
     )
 
     if not ok:
         await callback.message.edit_reply_markup()
-        await callback.message.answer(
-            "⚠️ Не нашёл точный код для замены.\n"
-            "Примени вручную — скопируй блок СТАЛО из ответа выше."
-        )
+        await callback.message.answer("❌ Не удалось прочитать файл с GitHub.")
         del pending_changes[task_id]
         return
 

@@ -20,7 +20,7 @@ ALLOWED_USERS: list[int] = [
 
 # === AI API ===
 OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")  # оставлен для совместимости
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
 # === ПУТИ ===
 BASE_DIR: Path = Path(__file__).parent
@@ -48,8 +48,10 @@ def validate_config() -> list[str]:
     errors = []
     if not BOT_TOKEN:
         errors.append("!!! BOT_TOKEN не задан в .env файле")
-    if not GROQ_API_KEY:
-        errors.append("!!! GROQ_API_KEY не задан в .env файле")
+    if not OPENROUTER_API_KEY and not GROQ_API_KEY:
+        errors.append("!!! OPENROUTER_API_KEY не задан в .env файле — бот не сможет обращаться к AI")
+    if not GITHUB_TOKEN:
+        errors.append("... GITHUB_TOKEN не задан — применение изменений через бота работать не будет")
     if not ALLOWED_USERS:
         errors.append("... ALLOWED_USERS не задан — бот будет открыт для всех!")
     return errors

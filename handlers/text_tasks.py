@@ -400,7 +400,6 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
 
         # Экранируем < > чтобы не ломать HTML-парсер Telegram
         safe = ai_response.replace("<", "&lt;").replace(">", "&gt;")
-        footer = f"\n\n📊 {tokens_used:,} токенов"
 
         has_change = _detect_code_change(ai_response)
         if has_change:
@@ -412,12 +411,12 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                 "full_response": ai_response,
             }
             await status_msg.edit_text(
-                safe[:4000] + footer,
+                safe[:4096],
                 reply_markup=_change_keyboard(task_id),
                 parse_mode=None
             )
         else:
-            await status_msg.edit_text(safe[:4000] + footer, parse_mode=None)
+            await status_msg.edit_text(safe[:4096], parse_mode=None)
 
     except asyncio.CancelledError:
         logger.info(f"Задача {task_id} отменена — user {user_id}")

@@ -120,7 +120,6 @@ async def handle_photo(message: Message):
             full_response = (
                 f"{screenshot_info}\n\n"
                 f"💡 *Решение:*\n{solution[:2000]}\n\n"
-                f"📊 Токенов: {tokens_used:,}"
             )
 
             await status_msg.edit_text(full_response[:4096], parse_mode="Markdown")
@@ -197,7 +196,6 @@ async def handle_video(message: Message):
         if analysis.get("description"):
             lines.append(f"💡 *Вывод AI:*\n{analysis['description']}")
 
-        lines.append(f"\n📊 Токенов: {tokens_used:,}")
 
         await status_msg.edit_text("\n".join(lines)[:4096], parse_mode="Markdown")
 
@@ -282,7 +280,4 @@ async def handle_document(message: Message):
     await add_to_conversation(user_id, "user", f"[Файл: {doc.file_name}] {caption}")
     await add_to_conversation(user_id, "assistant", response)
 
-    await status_msg.edit_text(
-        response[:4000] + f"\n\n📊 Токенов: {tokens_used:,}",
-        parse_mode="Markdown"
-    )
+    await status_msg.edit_text(response[:4096], parse_mode="Markdown")

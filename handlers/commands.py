@@ -268,7 +268,7 @@ async def cmd_explain(message: Message):
     explanation, tokens = await explain_error(error_text)
 
     await msg.edit_text(
-        explanation[:4000] + f"\n\n📊 Токенов: {tokens:,}",
+        explanation[:4096],
         parse_mode="Markdown"
     )
 
@@ -302,7 +302,7 @@ async def cmd_review(message: Message):
     feedback, tokens = await suggest_best_practices(code, language)
 
     await msg.edit_text(
-        feedback[:4000] + f"\n\n📊 Токенов: {tokens:,}",
+        feedback[:4096],
         parse_mode="Markdown"
     )
 

@@ -10,11 +10,13 @@
 import html
 import sys
 import os
+import asyncio
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aiogram import Router
+import aiohttp
+from aiogram import Bot, Router
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from loguru import logger
 
@@ -39,6 +41,32 @@ def _preview_filename(file_path: str) -> str:
 
 def _pages_url(file_path: str) -> str:
     return f"{GITHUB_PAGES_BASE}/{file_path}"
+
+
+async def _check_preview_available(bot: Bot, chat_id: int, url: str, task_id: int,
+                                   retries: int = 5, interval: int = 30) -> None:
+    """Фоновая задача: опрашивает GitHub Pages пока превью не появится (или истечёт таймаут)."""
+    await asyncio.sleep(interval)
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(retries):
+            try:
+                async with session.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    if r.status == 200:
+                        await bot.send_message(
+                            chat_id,
+                            f"✅ Превью доступно!\n{url}\n\nЕсли всё ок — жми ✅ Добавить в игру выше.",
+                        )
+                        return
+            except Exception:
+                pass
+            if attempt < retries - 1:
+                await asyncio.sleep(interval)
+
+    await bot.send_message(
+        chat_id,
+        f"⚠️ Превью ещё не появилось через {retries * interval // 60} мин.\n"
+        f"GitHub Pages может тупить — проверь вручную:\n{url}",
+    )
 
 
 async def _build_new_content(file_path: str, old_code: str | None, new_code: str, task_id: int, func_name: str | None = None) -> tuple[bool, str, str, bool]:
@@ -139,11 +167,14 @@ async def callback_mkpreview(callback: CallbackQuery):
 
     await callback.message.edit_reply_markup()
     await callback.message.answer(
-        f"🎮 Превью готово! Проверь — через 1–2 мин будет доступно:\n\n"
-        f"{preview_url}{warn}\n\n"
-        f"Если всё ок — жми ✅ Добавить в игру.",
+        f"🎮 Превью создаётся... Проверяю доступность автоматически.{warn}\n\n"
+        f"{preview_url}",
         reply_markup=kb
     )
+
+    asyncio.create_task(_check_preview_available(
+        callback.bot, callback.message.chat.id, preview_url, task_id
+    ))
 
 
 # ── ✅ Добавить в игру (из превью) ───────────────────────────────────────────

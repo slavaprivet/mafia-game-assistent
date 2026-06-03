@@ -23,7 +23,7 @@ from memory import (
     save_reminder, get_todos, save_todo, get_changes_with_rollback
 )
 from ai_client import ask_code_model, get_user_model, get_model_info, AVAILABLE_MODELS, set_user_model
-from game_expert import search_in_code, read_relevant_files, load_index, index_game, _fetch_file
+from game_expert import search_in_code, read_relevant_files, load_index, index_game, _fetch_file, extract_game_patterns
 from limit_manager import check_limit, track_usage
 
 router = Router()
@@ -356,10 +356,16 @@ def _detect_code_change(response: str) -> bool:
 
 
 def _parse_code_change(response: str) -> dict:
-    change = {"file": None, "old_code": None, "new_code": None, "description": response[:100]}
+    change = {"file": None, "old_code": None, "new_code": None, "func_name": None, "description": response[:100]}
+
     file_match = re.search(r"[Фф]айл[:\s]+([^\n]+)", response)
     if file_match:
-        change["file"] = file_match.group(1).strip().rstrip(".")
+        change["file"] = file_match.group(1).strip().rstrip(".").strip()
+
+    func_match = re.search(r"ФУНКЦИЯ[:\s]+([^\n]+)", response)
+    if func_match:
+        change["func_name"] = func_match.group(1).strip().rstrip("()")
+
     code_blocks = re.findall(r"```(?:\w+)?\n(.*?)```", response, re.DOTALL)
     if len(code_blocks) >= 2:
         change["old_code"] = code_blocks[0].strip()
@@ -514,7 +520,13 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                 )
                 # Расширяем запрос для поиска нужного фрагмента
                 search_query = text + " " + " ".join(_expand_search(text)[:3])
-                code_context = await read_relevant_files(unique_files, max_chars=12000, query=search_query)
+                code_context = await read_relevant_files(unique_files, max_chars=10000, query=search_query)
+
+                # Добавляем паттерны игры если задача про NPC/персонажей/зоны
+                if any(k in text.lower() for k in ["нпс", "перс", "npc", "зон", "район", "банд", "коп", "здани", "spawn"]):
+                    patterns = await extract_game_patterns()
+                    if patterns:
+                        code_context = code_context + patterns
         # Если код не нужен или не найден — идём к AI без контекста (это нормально)
 
         index_summary = ""
@@ -535,16 +547,22 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
             "Структура проекта:\n"
             "• world.html — ГЛАВНЫЙ файл (открытый мир), используй по умолчанию\n"
             "• hub.html — хаб города, battle.html — бой, creator.html — редактор\n\n"
-            "Работа с кодом — два случая:\n\n"
-            "1. ДОБАВЛЯЕШЬ НОВОЕ (новый NPC, новая система, новая функция):\n"
-            "   — Не нужен блок БЫЛО. Просто напиши готовый код.\n"
-            "   — В комментарии укажи куда вставить: // ВСТАВИТЬ в функцию initNPCs() или // ДОБАВИТЬ после секции XXX\n"
-            "   — Формат: описание → СТАЛО:\\n```\\nкод\\n``` → Файл: world.html\n\n"
-            "2. МЕНЯЕШЬ СУЩЕСТВУЮЩЕЕ (если видел точный код в контексте):\n"
-            "   — БЫЛО: скопируй дословно из контекста (символ в символ)\n"
-            "   — СТАЛО: изменённая версия\n"
-            "   — Если не уверен в точном коде — используй формат из п.1\n\n"
-            "Никогда не пиши 'я не знаю код' — всегда пиши рабочий код и указывай куда его добавить."
+            "Работа с кодом — СТРОГО один из двух форматов:\n\n"
+            "ФОРМАТ А — добавление нового (новый NPC, функция, объект):\n"
+            "  1 строка: что добавлено\n"
+            "  ФУНКЦИЯ: имяФункцииКудаВставить\n"
+            "  СТАЛО:\n  ```\n  новый код\n  ```\n"
+            "  Файл: world.html\n\n"
+            "ФОРМАТ Б — замена существующего (если видел точный код):\n"
+            "  1 строка: что изменено\n"
+            "  БЫЛО:\n  ```\n  точная копия строк из контекста\n  ```\n"
+            "  СТАЛО:\n  ```\n  новый код\n  ```\n"
+            "  Файл: world.html\n\n"
+            "ПРАВИЛА:\n"
+            "• Смотри на паттерны кода в конце промпта — пиши в том же стиле\n"
+            "• Если видел initNPCs или аналог — используй ФУНКЦИЯ: initNPCs\n"
+            "• Никогда не пиши 'не знаю код' — используй паттерны и пиши рабочий код\n"
+            "• Код должен быть полным и рабочим, не заглушкой"
             + index_summary
         )
 

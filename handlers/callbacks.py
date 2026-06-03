@@ -19,7 +19,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from loguru import logger
 
 from config import GITHUB_REPO, GITHUB_BRANCH
-from game_expert import push_file_to_github, delete_file_from_github, _fetch_file
+from game_expert import push_file_to_github, delete_file_from_github, _fetch_file, insert_into_function
 from memory import save_code_change, save_rollback, get_rollback, mark_change_rolled_back
 from handlers.text_tasks import pending_changes
 
@@ -41,25 +41,47 @@ def _pages_url(file_path: str) -> str:
     return f"{GITHUB_PAGES_BASE}/{file_path}"
 
 
-async def _build_new_content(file_path: str, old_code: str | None, new_code: str, task_id: int) -> tuple[bool, str, str, bool]:
+async def _build_new_content(file_path: str, old_code: str | None, new_code: str, task_id: int, func_name: str | None = None) -> tuple[bool, str, str, bool]:
     """Читает файл с GitHub, вставляет изменение.
-    Возвращает (ok, new_content, old_content, exact_match).
-    exact_match=False если точный код не найден — добавили в конец."""
+    Возвращает (ok, new_content, old_content, exact_match)."""
     content = await _fetch_file(file_path)
     if not content:
         return False, "", "", False
 
     old_content = content
 
+    # Если AI указал функцию — ищем её и вставляем внутрь
+    if func_name and not old_code:
+        lines = content.splitlines()
+        insert_at = -1
+        depth = 0
+        in_func = False
+        for i, line in enumerate(lines):
+            if func_name in line and ("function " in line or "=>" in line or "const " in line):
+                in_func = True
+            if in_func:
+                depth += line.count("{") - line.count("}")
+                if depth > 0 and depth <= 1 and in_func and i > 0:
+                    insert_at = i
+                if depth <= 0 and in_func and i > 0:
+                    insert_at = i  # перед закрывающей }
+                    break
+
+        if insert_at > 0:
+            indent = "  "
+            new_lines = lines[:insert_at] + [f"{indent}{l}" for l in new_code.splitlines()] + lines[insert_at:]
+            new_content = "\n".join(new_lines)
+            return True, new_content, old_content, True
+
     if old_code and old_code in content:
         new_content = content.replace(old_code, new_code, 1)
         return True, new_content, old_content, True
     elif not old_code:
-        new_content = content + "\n" + new_code
+        new_content = content + "\n\n// Добавлено ботом\n" + new_code
         return True, new_content, old_content, True
     else:
-        # Точный код не найден — добавляем в конец файла
-        new_content = content + "\n\n/* Добавлено ботом */\n" + new_code
+        # Exact match failed — appending
+        new_content = content + "\n\n// Добавлено ботом\n" + new_code
         return True, new_content, old_content, False
 
 
@@ -82,7 +104,7 @@ async def callback_mkpreview(callback: CallbackQuery):
         return
 
     ok, new_content, _, exact = await _build_new_content(
-        change["file"], change.get("old_code"), change["new_code"], task_id
+        change["file"], change.get("old_code"), change["new_code"], task_id, change.get("func_name")
     )
 
     if not ok:
@@ -90,6 +112,7 @@ async def callback_mkpreview(callback: CallbackQuery):
         return
 
     preview_path = _preview_filename(change["file"])
+    func_info = f" в функцию {change['func_name']}" if change.get("func_name") and exact else ""
     warn = "" if exact else "\n\n⚠️ Точное место не найдено — код добавлен в конец файла. Проверь что всё ок."
     ok, msg = await push_file_to_github(preview_path, new_content, f"preview: task-{task_id}")
 
@@ -198,7 +221,7 @@ async def callback_apply(callback: CallbackQuery):
         return
 
     ok, new_content, old_content, exact = await _build_new_content(
-        change["file"], change.get("old_code"), change["new_code"], task_id
+        change["file"], change.get("old_code"), change["new_code"], task_id, change.get("func_name")
     )
 
     if not ok:

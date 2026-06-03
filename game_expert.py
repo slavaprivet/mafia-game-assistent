@@ -308,6 +308,110 @@ async def delete_file_from_github(path: str, commit_message: str) -> tuple[bool,
             return False, f"Ошибка удаления {resp.status}: {text[:200]}"
 
 
+async def extract_game_patterns(world_path: str = "world.html") -> str:
+    """
+    Анализирует world.html и извлекает ключевые паттерны игры:
+    структуру NPC, зон, зданий, ключевые функции.
+    Возвращает строку для системного промпта.
+    """
+    content = await _fetch_file(world_path)
+    if not content:
+        return ""
+
+    lines = content.splitlines()
+    patterns = []
+
+    # Ищем определения массивов NPC / зон / зданий (первые 5 строк каждого)
+    _ARRAY_MARKERS = ["npc", "zone", "district", "building", "gang", "spawn", "cop", "enemy"]
+    seen_arrays = set()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        low = stripped.lower()
+        # const/let/var someArray = [ или const NPCS = {
+        if any(m in low for m in _ARRAY_MARKERS):
+            if ("const " in stripped or "let " in stripped or "var " in stripped) and ("=" in stripped):
+                key = stripped[:40]
+                if key not in seen_arrays:
+                    seen_arrays.add(key)
+                    snippet = "\n".join(lines[i:i+6])
+                    patterns.append(f"// Структура: {snippet[:300]}")
+                    if len(patterns) >= 6:
+                        break
+
+    # Ключевые функции связанные с NPC/спавном/персонажами
+    _FUNC_MARKERS = ["spawnNpc", "spawnNPC", "addNpc", "createNpc", "initNpc",
+                     "spawnEnemy", "addEnemy", "createCharacter", "addGangMember",
+                     "spawnCop", "addCop", "createPlayer", "renderNpc", "updateNpc",
+                     "initNPCs", "initZones", "initBuildings", "initGangs"]
+    seen_funcs = set()
+    for i, line in enumerate(lines):
+        for marker in _FUNC_MARKERS:
+            if marker in line and ("function " in line or "=>" in line or "const " in line):
+                if marker not in seen_funcs:
+                    seen_funcs.add(marker)
+                    snippet = "\n".join(lines[i:i+8])
+                    patterns.append(f"// Функция {marker}:\n{snippet[:400]}")
+                    break
+
+    if not patterns:
+        return ""
+
+    return (
+        "\n\n--- ПАТТЕРНЫ КОДА ИГРЫ (используй как образец) ---\n"
+        + "\n\n".join(patterns[:8])
+        + "\n--- КОНЕЦ ПАТТЕРНОВ ---"
+    )
+
+
+async def find_function_in_file(file_path: str, func_name: str) -> tuple[int, int]:
+    """
+    Ищет функцию по имени в файле.
+    Возвращает (start_line, end_line) или (-1, -1) если не найдено.
+    """
+    content = await _fetch_file(file_path)
+    if not content:
+        return -1, -1
+
+    lines = content.splitlines()
+    start = -1
+    depth = 0
+
+    for i, line in enumerate(lines):
+        if func_name in line and ("function " in line or "=>" in line or "const " in line):
+            start = i
+            depth = 0
+
+        if start >= 0:
+            depth += line.count("{") - line.count("}")
+            if depth <= 0 and i > start:
+                return start, i
+
+    return start, len(lines) - 1 if start >= 0 else -1
+
+
+async def insert_into_function(file_path: str, func_name: str, new_code: str, commit_msg: str) -> tuple[bool, str]:
+    """
+    Вставляет новый код в конец указанной функции.
+    """
+    content = await _fetch_file(file_path)
+    if not content:
+        return False, f"Не удалось прочитать {file_path}"
+
+    lines = content.splitlines()
+    start, end = await find_function_in_file(file_path, func_name)
+
+    if start == -1:
+        return False, f"Функция {func_name} не найдена"
+
+    # Вставляем перед закрывающей скобкой функции
+    indent = "    "
+    insert_lines = [f"{indent}{l}" for l in new_code.splitlines()]
+    new_lines = lines[:end] + insert_lines + lines[end:]
+    new_content = "\n".join(new_lines)
+
+    return await push_file_to_github(file_path, new_content, commit_msg)
+
+
 def format_index_message() -> str:
     index = load_index()
     if not index or index.get("error"):

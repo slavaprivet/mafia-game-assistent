@@ -101,6 +101,7 @@ async def callback_mkpreview(callback: CallbackQuery):
         "new_content": new_content,
         "change": change,
     }
+    pending_changes.pop(task_id, None)  # чистим, превью уже создано
 
     preview_url = _pages_url(preview_path)
     kb = InlineKeyboardMarkup(inline_keyboard=[

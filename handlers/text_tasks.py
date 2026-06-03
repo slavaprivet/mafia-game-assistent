@@ -268,6 +268,17 @@ async def _heartbeat(status_msg: Message, base_text: str, task_id: int, interval
             pass
 
 
+def _extract_summary(response: str) -> str:
+    """Берёт первую строку до блока кода — это отчёт что сделано."""
+    for marker in ["БЫЛО:", "```", "Файл:"]:
+        if marker in response:
+            before = response.split(marker)[0].strip()
+            if before:
+                # Берём только первый абзац
+                return before.split("\n\n")[0].strip()
+    return response[:200].strip()
+
+
 def _detect_code_change(response: str) -> bool:
     indicators = ["БЫЛО:", "СТАЛО:", "Файл:", "```python", "```js", "```lua", "```html", "```javascript", "```css"]
     return any(ind in response for ind in indicators)
@@ -352,17 +363,19 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
             "Ты опытный разработчик игры «Мафиози» — изометрический открытый мир на JavaScript/HTML.\n"
             "Общаешься как живой напарник по разработке, на русском языке.\n\n"
             "Как отвечать:\n"
-            "• На простой вопрос — отвечай по-человечески, без шаблонов (2–5 предложений)\n"
+            "• На простой вопрос — 1–3 предложения, по делу\n"
             "• Если что-то непонятно — уточни, не угадывай\n"
-            "• Если нужен код — дай конкретный рабочий код + одна строка зачем\n"
-            "• Можешь предложить идею, заметить проблему, спросить «а зачем?»\n"
             "• Не пиши вступления: 'Конечно!', 'Отличный вопрос!', 'Понял вас!'\n"
-            "• Пиши как человек, а не как документация\n\n"
+            "• Пиши как человек, не как документация\n\n"
             "Структура проекта:\n"
             "• world.html — ГЛАВНЫЙ файл (открытый мир), используй по умолчанию\n"
             "• hub.html — хаб города, battle.html — бой, creator.html — редактор\n\n"
-            "Когда предлагаешь изменение кода:\n"
-            "БЫЛО:\n```\nстарый код\n```\nСТАЛО:\n```\nновый код\n```\nФайл: имя_файла"
+            "Когда делаешь изменение в коде — СТРОГО такой формат:\n"
+            "Сначала 1 строка: что именно добавлено/изменено (без лишних слов).\n"
+            "Затем блоки кода:\n"
+            "БЫЛО:\n```\nстарый код\n```\nСТАЛО:\n```\nновый код\n```\nФайл: имя_файла\n\n"
+            "ВАЖНО: пользователь видит только первую строку описания — код скрыт. "
+            "Не объясняй как работает код, только скажи что изменилось."
             + index_summary
         )
 
@@ -409,8 +422,11 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                 "change": change_info,
                 "full_response": ai_response,
             }
+            summary = _extract_summary(ai_response)
+            file_name = change_info.get("file") or "файл"
+            display = f"✏️ {summary}\n\n📄 {file_name}"
             await status_msg.edit_text(
-                safe[:4096],
+                display[:4096],
                 reply_markup=_change_keyboard(task_id),
                 parse_mode=None
             )

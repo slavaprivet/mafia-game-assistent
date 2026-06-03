@@ -299,7 +299,6 @@ async def delete_file_from_github(path: str, commit_message: str) -> tuple[bool,
             data = await resp.json()
             sha = data.get("sha")
 
-        import base64 as _b64
         payload = {"message": commit_message, "sha": sha, "branch": GITHUB_BRANCH}
         async with session.delete(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:

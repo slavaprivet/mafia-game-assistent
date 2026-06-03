@@ -691,6 +691,17 @@ async def handle_text_task(message: Message):
     if prev and not prev.done():
         prev.cancel()
 
+    # Чистим старые pending изменения и превью этого пользователя
+    from handlers.callbacks import pending_previews
+    from game_expert import delete_file_from_github
+    old_previews = [(tid, d) for tid, d in list(pending_previews.items()) if d.get("user_id") == user_id]
+    for tid, pdata in old_previews:
+        asyncio.create_task(delete_file_from_github(pdata["preview_path"], "cleanup: new task started"))
+        del pending_previews[tid]
+    old_changes = [tid for tid, d in list(pending_changes.items()) if d.get("user_id") == user_id]
+    for tid in old_changes:
+        del pending_changes[tid]
+
     # Напоминание
     is_reminder, task_text, remind_time = _is_reminder_request(text)
     if is_reminder and remind_time:

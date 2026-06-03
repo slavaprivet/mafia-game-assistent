@@ -13,7 +13,7 @@ from loguru import logger
 
 from config import ALLOWED_USERS, TEMP_DIR
 from memory import save_task, update_task, add_to_conversation, get_conversation
-from voice import speech_to_text, text_to_speech, convert_ogg_to_wav
+from voice import speech_to_text, text_to_speech
 from ai_client import ask_code_model
 from limit_manager import check_limit, track_usage
 
@@ -54,20 +54,9 @@ async def handle_voice(message: Message):
         await status_msg.edit_text(f"❌ Не могу скачать голосовое: {e}")
         return
 
-    # Конвертируем ogg → wav
-    wav_path = await convert_ogg_to_wav(ogg_path)
+    # Распознаём речь (Groq Whisper принимает .ogg напрямую)
+    recognized_text = await speech_to_text(ogg_path)
     Path(ogg_path).unlink(missing_ok=True)
-
-    if not wav_path:
-        await status_msg.edit_text(
-            "❌ Не могу конвертировать аудио.\n\n"
-            "Нужен ffmpeg: https://ffmpeg.org/download.html"
-        )
-        return
-
-    # Распознаём речь
-    recognized_text = await speech_to_text(wav_path)
-    Path(wav_path).unlink(missing_ok=True)
 
     if not recognized_text:
         await status_msg.edit_text(

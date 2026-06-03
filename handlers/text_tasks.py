@@ -617,7 +617,7 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
             "КРИТИЧЕСКИЕ ПРАВИЛА:\n"
             "• Поля 'name' у NPC НЕТ — для подписи используй cryText + cryUntil:Infinity\n"
             "• Никогда не выдумывай переменные — используй только то что есть в коде\n"
-            "• Для позиции у Burj Mafia: r:36.5, c:36.5 (BURJ_POS + 0.5)\n"
+            "• Для позиции ПЕРЕД зданием Burj Mafia (на тротуаре): r:38.5, c:36.5 — НЕ r:36.5,c:36.5 (это внутри здания!)\n"
             "• Структура NPC — строго как показано, без лишних полей"
             + index_summary
             + knowledge_summary

@@ -103,6 +103,18 @@ async def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS game_knowledge (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic TEXT NOT NULL,
+                request TEXT NOT NULL,
+                working_code TEXT NOT NULL,
+                func_name TEXT,
+                file_path TEXT,
+                model TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
         await db.commit()
         logger.info("📦 База данных инициализирована")
 
@@ -365,5 +377,49 @@ async def get_reminders(user_id: int) -> list:
         rows = await _fetchall(db,
             "SELECT * FROM reminders WHERE user_id=? AND done=0 ORDER BY remind_at",
             (user_id,)
+        )
+        return [dict(r) for r in rows]
+
+
+# ─── Знания об игре (обучение на успешных изменениях) ─────
+
+async def save_game_knowledge(topic: str, request: str, working_code: str,
+                               func_name: str = "", file_path: str = "", model: str = ""):
+    """Сохраняет рабочий пример кода — бот учится на своих успехах."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Не дублируем — если такой топик уже есть, обновляем
+        await db.execute("""
+            INSERT INTO game_knowledge (topic, request, working_code, func_name, file_path, model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (topic, request[:200], working_code[:2000], func_name, file_path, model, datetime.now().isoformat()))
+        await db.commit()
+
+
+async def get_relevant_knowledge(query: str, limit: int = 3) -> list[dict]:
+    """Ищет похожие рабочие примеры по ключевым словам."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Простой поиск по словам из запроса
+        words = [w for w in query.lower().split() if len(w) > 3]
+        if not words:
+            return []
+        conditions = " OR ".join(["LOWER(topic) LIKE ? OR LOWER(request) LIKE ?" for _ in words])
+        params = []
+        for w in words:
+            params.extend([f"%{w}%", f"%{w}%"])
+        params.append(limit)
+        rows = await _fetchall(db,
+            f"SELECT * FROM game_knowledge WHERE {conditions} ORDER BY created_at DESC LIMIT ?",
+            params
+        )
+        return [dict(r) for r in rows]
+
+
+async def get_all_knowledge(limit: int = 20) -> list[dict]:
+    """Возвращает все накопленные знания."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await _fetchall(db,
+            "SELECT * FROM game_knowledge ORDER BY created_at DESC LIMIT ?", (limit,)
         )
         return [dict(r) for r in rows]

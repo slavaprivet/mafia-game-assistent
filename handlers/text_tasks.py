@@ -20,7 +20,8 @@ from loguru import logger
 from config import ALLOWED_USERS, BASE_DIR
 from memory import (
     save_task, update_task, add_to_conversation, get_conversation,
-    save_reminder, get_todos, save_todo, get_changes_with_rollback
+    save_reminder, get_todos, save_todo, get_changes_with_rollback,
+    get_relevant_knowledge
 )
 from ai_client import ask_code_model, get_user_model, get_model_info, AVAILABLE_MODELS, set_user_model
 from game_expert import search_in_code, read_relevant_files, load_index, index_game, _fetch_file, extract_game_patterns
@@ -551,6 +552,22 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
                 f"\n\nВ проекте {index.get('file_count', 0)} файлов: {', '.join(file_names[:10])}."
             )
 
+        # Подтягиваем рабочие примеры из памяти бота
+        knowledge_summary = ""
+        try:
+            known = await get_relevant_knowledge(text, limit=3)
+            if known:
+                examples = []
+                for k in known:
+                    ex = f"[Работало раньше: {k['topic']}]\n"
+                    if k['func_name']:
+                        ex += f"Функция: {k['func_name']}\n"
+                    ex += f"Код:\n```\n{k['working_code'][:500]}\n```"
+                    examples.append(ex)
+                knowledge_summary = "\n\n=== ПРИМЕРЫ ИЗ ПАМЯТИ (эти решения уже работали) ===\n" + "\n\n".join(examples)
+        except Exception:
+            pass
+
         system_prompt = (
             "Ты опытный разработчик игры «Мафиози» — изометрический открытый мир на JavaScript/HTML.\n"
             "Общаешься как живой напарник по разработке, на русском языке.\n\n"
@@ -597,6 +614,7 @@ async def _process_task(user_id: int, task_id: int, text: str, status_msg: Messa
             "• Для позиции у Burj Mafia используй BURJ_POS.r и BURJ_POS.c\n"
             "• Структура NPC — строго как показано выше, без лишних полей"
             + index_summary
+            + knowledge_summary
         )
 
         # Передаём текст пользователя как есть — не оборачиваем в "Задача:",

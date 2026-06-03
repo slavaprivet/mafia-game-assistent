@@ -20,7 +20,7 @@ from loguru import logger
 
 from config import GITHUB_REPO, GITHUB_BRANCH
 from game_expert import push_file_to_github, delete_file_from_github, _fetch_file, insert_into_function
-from memory import save_code_change, save_rollback, get_rollback, mark_change_rolled_back
+from memory import save_code_change, save_rollback, get_rollback, mark_change_rolled_back, save_game_knowledge
 from handlers.text_tasks import pending_changes
 
 router = Router()
@@ -183,6 +183,20 @@ async def callback_addtogame(callback: CallbackQuery):
     )
     if old_content and change_id:
         await save_rollback(change_id, preview_data["target_path"], old_content)
+
+    # Сохраняем успешный пример как знание для будущих задач
+    change = preview_data["change"]
+    if change.get("new_code"):
+        from ai_client import get_user_model
+        model = get_user_model(callback.from_user.id)
+        await save_game_knowledge(
+            topic=change.get("description", "")[:100],
+            request=change.get("description", "")[:200],
+            working_code=change.get("new_code", "")[:2000],
+            func_name=change.get("func_name", ""),
+            file_path=preview_data["target_path"],
+            model=model,
+        )
 
     # Удаляем превью-файл
     await delete_file_from_github(preview_data["preview_path"], f"cleanup: preview task-{task_id}")

@@ -107,7 +107,11 @@ async def main():
             pass
 
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(
+            bot,
+            allowed_updates=dp.resolve_used_update_types(),
+            drop_pending_updates=True,  # выгоняем старый экземпляр при старте
+        )
     except Exception as e:
         if "Conflict" in str(e):
             for uid in ALLOWED_USERS:

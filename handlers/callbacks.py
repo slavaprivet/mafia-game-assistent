@@ -173,8 +173,10 @@ async def callback_mkpreview(callback: CallbackQuery):
     ])
 
     await callback.message.edit_reply_markup()
+    desc = change.get("description", "")
+    desc_line = f"\n📝 {desc[:120]}" if desc else ""
     await callback.message.answer(
-        f"🎮 Превью создаётся... Проверяю доступность автоматически.{warn}\n\n"
+        f"🎮 Превью создаётся...{desc_line}{warn}\n\n"
         f"{preview_url}",
         reply_markup=kb
     )

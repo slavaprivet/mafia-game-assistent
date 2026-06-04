@@ -361,7 +361,7 @@ def _detect_code_change(response: str) -> bool:
 
 
 def _parse_code_change(response: str) -> dict:
-    change = {"file": None, "old_code": None, "new_code": None, "func_name": None, "description": response[:100]}
+    change = {"file": None, "old_code": None, "new_code": None, "func_name": None, "description": _extract_summary(response)}
 
     file_match = re.search(r"[Фф]айл[:\s]+([^\n]+)", response)
     if file_match:

@@ -145,7 +145,7 @@ async def _call_openrouter(model_id: str, messages: list, system_prompt: str = N
             OPENROUTER_URL,
             json={"model": model_id, "messages": msgs, "max_tokens": 4096},
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=25)
+            timeout=aiohttp.ClientTimeout(total=15)
         ) as resp:
             data = await resp.json()
             if resp.status == 429:
@@ -256,7 +256,7 @@ async def _call_deepseek(model_id: str, messages: list, system_prompt: str = Non
             DEEPSEEK_URL,
             json={"model": model_id, "messages": msgs, "max_tokens": 4096},
             headers=headers,
-            timeout=aiohttp.ClientTimeout(total=30)
+            timeout=aiohttp.ClientTimeout(total=25)
         ) as resp:
             data = await resp.json()
             if resp.status == 429:
@@ -311,25 +311,17 @@ async def _call_groq(model_id: str, messages: list, system_prompt: str = None) -
             return answer, tokens
 
 
-async def ask_code_model(
-    prompt: str,
-    system_prompt: str = None,
-    conversation_history: list = None,
-    user_id: int = 0,
+async def _ask_code_model_inner(
+    messages: list,
+    system_prompt: str,
+    preferred: str,
 ) -> tuple[str, int]:
-    messages = []
-    if conversation_history:
-        messages.extend(conversation_history[-10:])
-    messages.append({"role": "user", "content": prompt[:MAX_CONTEXT_SIZE]})
-
-    preferred = get_user_model(user_id)
     order = [preferred] + [m for m in FALLBACK_ORDER if m != preferred]
-
     last_error = None
     for model_key in order:
         model = AVAILABLE_MODELS[model_key]
         try:
-            logger.debug(f"Пробую {model['name']} для user {user_id}")
+            logger.debug(f"Пробую {model['name']}")
             if model["provider"] == "gemini":
                 answer, tokens = await _call_gemini(model["id"], messages, system_prompt)
             elif model["provider"] == "cerebras":
@@ -352,6 +344,29 @@ async def ask_code_model(
             last_error = e
 
     return f"❌ Все модели недоступны: {last_error}", 0
+
+
+async def ask_code_model(
+    prompt: str,
+    system_prompt: str = None,
+    conversation_history: list = None,
+    user_id: int = 0,
+) -> tuple[str, int]:
+    import asyncio
+    messages = []
+    if conversation_history:
+        messages.extend(conversation_history[-10:])
+    messages.append({"role": "user", "content": prompt[:MAX_CONTEXT_SIZE]})
+
+    preferred = get_user_model(user_id)
+    try:
+        return await asyncio.wait_for(
+            _ask_code_model_inner(messages, system_prompt, preferred),
+            timeout=90
+        )
+    except asyncio.TimeoutError:
+        logger.error("ask_code_model: глобальный таймаут 90с")
+        return "❌ Все модели зависли (90 сек). Попробуй ещё раз — обычно помогает.", 0
 
 
 async def ask_vision_model(image_path: str, prompt: str) -> tuple[str, int]:

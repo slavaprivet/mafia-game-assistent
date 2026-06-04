@@ -133,6 +133,8 @@ async def callback_mkpreview(callback: CallbackQuery):
     change = change_data["change"]
 
     if not change.get("file") or not change.get("new_code"):
+        await callback.message.edit_reply_markup()
+        pending_changes.pop(task_id, None)
         await callback.message.answer("⚠️ Не могу создать превью — файл или код не определён.")
         return
 
@@ -191,11 +193,12 @@ async def callback_mkpreview(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("addtogame:"))
 async def callback_addtogame(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
-    preview_data = pending_previews.get(task_id)
+
+    # Берём И СРАЗУ удаляем — защита от двойного клика
+    preview_data = pending_previews.pop(task_id, None)
 
     if not preview_data:
         # Бот перезапускался — но превью-файл может ещё быть на GitHub
-        # Пробуем восстановить: берём world_preview.html и пушим в world.html
         await callback.answer("⚙️ Бот перезапускался, пробую восстановить превью...", show_alert=False)
         preview_content = await _fetch_file("world_preview.html")
         if not preview_content:
@@ -253,7 +256,6 @@ async def callback_addtogame(callback: CallbackQuery):
 
     # Удаляем превью-файл
     await delete_file_from_github(preview_data["preview_path"], f"cleanup: preview task-{task_id}")
-    del pending_previews[task_id]
 
     game_url = _pages_url(preview_data["target_path"])
     kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -272,7 +274,9 @@ async def callback_addtogame(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("apply:"))
 async def callback_apply(callback: CallbackQuery):
     task_id = int(callback.data.split(":")[1])
-    change_data = pending_changes.get(task_id)
+
+    # Берём И СРАЗУ удаляем — защита от двойного клика
+    change_data = pending_changes.pop(task_id, None)
 
     if not change_data:
         await callback.answer("❌ Задача не найдена или уже обработана")
@@ -315,6 +319,18 @@ async def callback_apply(callback: CallbackQuery):
         if old_content and change_id:
             await save_rollback(change_id, change["file"], old_content)
 
+        # Сохраняем успешный пример в базу знаний
+        if change.get("new_code"):
+            from ai_client import get_user_model
+            await save_game_knowledge(
+                topic=change.get("description", "")[:100],
+                request=change.get("description", "")[:200],
+                working_code=change.get("new_code", "")[:2000],
+                func_name=change.get("func_name", ""),
+                file_path=change["file"],
+                model=get_user_model(callback.from_user.id),
+            )
+
         game_url = _pages_url(change["file"])
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="↩️ Отменить изменение", callback_data=f"rollback:{change_id}")
@@ -327,8 +343,6 @@ async def callback_apply(callback: CallbackQuery):
         )
     else:
         await callback.message.answer(f"❌ {msg}")
-
-    del pending_changes[task_id]
 
 
 # ── ↩️ Отменить превью ───────────────────────────────────────────────────────

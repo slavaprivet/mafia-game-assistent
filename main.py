@@ -135,15 +135,23 @@ async def main():
             pass
 
     # Принудительно забираем сессию у любого другого экземпляра
-    # (getUpdates с timeout=0 выбивает чужой polling, потом ждём пока тот умрёт)
-    for attempt in range(5):
+    # delete_webhook убивает любые webhook/polling сессии на стороне Telegram
+    try:
+        await bot.delete_webhook(drop_pending_updates=False)
+        logger.info("🔒 Webhook удалён")
+    except Exception as e:
+        logger.warning(f"delete_webhook: {e}")
+    await asyncio.sleep(2)
+    # getUpdates с timeout=0 дополнительно выбивает чужой polling
+    for attempt in range(10):
         try:
             await bot.get_updates(offset=-1, timeout=0)
+            logger.info("🔒 Сессия захвачена")
             break
         except Exception:
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
     await asyncio.sleep(5)  # даём старому боту время умереть
-    logger.info("🔒 Сессия захвачена, стартую polling...")
+    logger.info("🔒 Стартую polling...")
 
     try:
         await dp.start_polling(

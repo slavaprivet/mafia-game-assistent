@@ -723,82 +723,88 @@ async def handle_text_task(message: Message):
     if text.startswith("/"):
         return
 
-    # Защита от дублей — одно и то же сообщение в течение 15 сек
-    now = time.time()
-    last_text, last_ts = _last_message.get(user_id, ("", 0))
-    has_pending = any(d.get("user_id") == user_id for d in pending_changes.values()) or \
-                  any(d.get("user_id") == user_id for d in pending_previews.values())
-    if text == last_text and now - last_ts < 15 and not has_pending:
-        await message.answer("⏳ Уже обрабатываю — подожди секунду или напиши чуть иначе.")
-        return
-    _last_message[user_id] = (text, now)
+    try:
+        # Защита от дублей — одно и то же сообщение в течение 15 сек
+        now = time.time()
+        last_text, last_ts = _last_message.get(user_id, ("", 0))
+        has_pending = any(d.get("user_id") == user_id for d in pending_changes.values()) or \
+                      any(d.get("user_id") == user_id for d in pending_previews.values())
+        if text == last_text and now - last_ts < 15 and not has_pending:
+            await message.answer("⏳ Уже обрабатываю — подожди секунду или напиши чуть иначе.")
+            return
+        _last_message[user_id] = (text, now)
 
-    # Короткие слова-подтверждения не отменяют текущую задачу и не запускают AI
-    _noise_words = {"ок", "ok", "окей", "okay", "да", "нет", "понял", "понятно", "хорошо", "ладно", "угу", "ага"}
-    if text.lower() in _noise_words:
+        # Короткие слова-подтверждения не отменяют текущую задачу и не запускают AI
+        _noise_words = {"ок", "ok", "окей", "okay", "да", "нет", "понял", "понятно", "хорошо", "ладно", "угу", "ага"}
+        if text.lower() in _noise_words:
+            prev = active_tasks.get(user_id)
+            if prev and not prev.done():
+                await message.answer("⏳ Обрабатываю предыдущую задачу, подожди...")
+            return
+
+        # Отменяем предыдущую задачу
         prev = active_tasks.get(user_id)
         if prev and not prev.done():
-            await message.answer("⏳ Обрабатываю предыдущую задачу, подожди...")
+            prev.cancel()
+
+        # Чистим старые pending изменения и превью этого пользователя
+        from game_expert import delete_file_from_github
+        old_previews = [(tid, d) for tid, d in list(pending_previews.items()) if d.get("user_id") == user_id]
+        if old_previews:
+            await message.answer("🔄 Предыдущее превью отменено — берусь за новую задачу.")
+        for tid, pdata in old_previews:
+            asyncio.create_task(delete_file_from_github(pdata["preview_path"], "cleanup: new task started"))
+            del pending_previews[tid]
+        old_changes = [tid for tid, d in list(pending_changes.items()) if d.get("user_id") == user_id]
+        for tid in old_changes:
+            del pending_changes[tid]
+
+        # Напоминание
+        is_reminder, task_text, remind_time = _is_reminder_request(text)
+        if is_reminder and remind_time:
+            await save_reminder(user_id, remind_time, task_text)
+            await message.answer(
+                f"⏰ Напомню!\nЗадача: {task_text}\nКогда: {remind_time.strftime('%d.%m %H:%M')}"
+            )
             return
-        # Нет активной задачи — просто игнорируем
-        return
 
-    # Отменяем предыдущую задачу
-    prev = active_tasks.get(user_id)
-    if prev and not prev.done():
-        prev.cancel()
+        # Пробуем распознать как команду на естественном языке
+        if await _handle_nlp(message, user_id, text):
+            return
 
-    # Чистим старые pending изменения и превью этого пользователя
-    from game_expert import delete_file_from_github
-    old_previews = [(tid, d) for tid, d in list(pending_previews.items()) if d.get("user_id") == user_id]
-    if old_previews:
-        await message.answer("🔄 Предыдущее превью отменено — берусь за новую задачу.")
-    for tid, pdata in old_previews:
-        asyncio.create_task(delete_file_from_github(pdata["preview_path"], "cleanup: new task started"))
-        del pending_previews[tid]
-    old_changes = [tid for tid, d in list(pending_changes.items()) if d.get("user_id") == user_id]
-    for tid in old_changes:
-        del pending_changes[tid]
+        # Лимит токенов
+        can_proceed, limit_msg = await check_limit(user_id)
+        if not can_proceed:
+            await message.answer(limit_msg)
+            return
 
-    # Напоминание
-    is_reminder, task_text, remind_time = _is_reminder_request(text)
-    if is_reminder and remind_time:
-        await save_reminder(user_id, remind_time, task_text)
-        await message.answer(
-            f"⏰ Напомню!\nЗадача: {task_text}\nКогда: {remind_time.strftime('%d.%m %H:%M')}"
+        # Предупреждение об устаревшем индексе (> 3 часов)
+        try:
+            idx_path = BASE_DIR / "game_index.json"
+            if idx_path.exists():
+                age_hours = (time.time() - idx_path.stat().st_mtime) / 3600
+                if age_hours > 3:
+                    await message.answer(
+                        f"⚠️ Код устарел ({int(age_hours)}ч). Напиши 'обнови код' чтобы обновить."
+                    )
+        except Exception:
+            pass
+
+        task_id = await save_task(user_id, "text", text)
+        model_key = get_user_model(user_id)
+        model_info = get_model_info(model_key)
+
+        status_msg = await message.answer(
+            "⚙️ Делаю...",
+            reply_markup=_stop_keyboard(task_id)
         )
-        return
 
-    # Пробуем распознать как команду на естественном языке
-    if await _handle_nlp(message, user_id, text):
-        return
+        task = asyncio.create_task(_process_task(user_id, task_id, text, status_msg, model_info))
+        active_tasks[user_id] = task
 
-    # Лимит токенов
-    can_proceed, limit_msg = await check_limit(user_id)
-    if not can_proceed:
-        await message.answer(limit_msg)
-        return
-
-    # Предупреждение об устаревшем индексе (> 3 часов)
-    try:
-        idx_path = BASE_DIR / "game_index.json"
-        if idx_path.exists():
-            age_hours = (time.time() - idx_path.stat().st_mtime) / 3600
-            if age_hours > 3:
-                await message.answer(
-                    f"⚠️ Код устарел ({int(age_hours)}ч). Напиши 'обнови код' чтобы обновить."
-                )
-    except Exception:
-        pass
-
-    task_id = await save_task(user_id, "text", text)
-    model_key = get_user_model(user_id)
-    model_info = get_model_info(model_key)
-
-    status_msg = await message.answer(
-        f"⚙️ Делаю...",
-        reply_markup=_stop_keyboard(task_id)
-    )
-
-    task = asyncio.create_task(_process_task(user_id, task_id, text, status_msg, model_info))
-    active_tasks[user_id] = task
+    except Exception as e:
+        logger.error(f"handle_text_task упал: {e}", exc_info=True)
+        try:
+            await message.answer(f"❌ Внутренняя ошибка: {e}\n\nПопробуй ещё раз.")
+        except Exception:
+            pass
